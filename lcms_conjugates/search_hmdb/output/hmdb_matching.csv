@@ -1,0 +1,39 @@
+Treatment Compound,m/z,RT,Polarity,Name,HMDB,Probable Conjugate,Measured Mass / Da,Theoretical Mass / Da,Absolute Deviation / ppm
+Acetaminophen,326.08785,1.09,Negative,Acetaminophen glucuronide | Blepharin,HMDB0010316 | HMDB0029344,Glucuronic acid,327.09513,327.0954 | 327.0954,0.9 | 0.9
+Acetaminophen,457.28023,7.36,Negative,,,Glucuronic acid,458.2875,,
+Acrylamide,377.11405,0.52,Negative,10-Methoxycamptothecin,HMDB0244274,Glutathione,378.12133,378.1216,0.6
+Chlorzoxazone,360.01272,1.51,Negative,,,Glucuronic acid,361.02,,
+Chlorzoxazone,360.01301,1.13,Negative,,,Glucuronic acid,361.02029,,
+Chlorzoxazone,447.07418,2.55,Negative,,,Glutathione,448.08146,,
+Chlorzoxazone,447.07422,2.87,Negative,,,Glutathione,448.0815,,
+Chlorzoxazone,263.93747,2.61,Negative,,,Sulfate,264.94475,,
+4-Nitrophenol,314.05159,0.72,Negative,4-Nitrophenyl beta-D-glucopyranosiduronic acid,HMDB0244304,Glucuronic acid,315.05887,315.059,0.5
+4-Nitrophenol,314.05179,1.16,Negative,4-Nitrophenyl beta-D-glucopyranosiduronic acid,HMDB0244304,Glucuronic acid,315.05907,315.059,0.1
+4-Nitrophenol,314.05188,2.8,Negative,4-Nitrophenyl beta-D-glucopyranosiduronic acid,HMDB0244304,Glucuronic acid,315.05916,315.059,0.4
+4-Nitrophenol,314.0519,3.6,Negative,4-Nitrophenyl beta-D-glucopyranosiduronic acid,HMDB0244304,Glucuronic acid,315.05918,315.059,0.5
+4-Nitrophenol,314.05195,1.36,Negative,4-Nitrophenyl beta-D-glucopyranosiduronic acid,HMDB0244304,Glucuronic acid,315.05923,315.059,0.6
+4-Nitrophenol,316.05671,2.53,Negative,,,Glucuronic acid,317.06398,,
+4-Nitrophenol,330.04667,1.79,Negative,,,Glucuronic acid,331.05394,,
+4-Nitrophenol,344.06221,3.13,Negative,,,Glucuronic acid,345.06949,,
+4-Nitrophenol,352.0284,3.04,Negative,,,Glucuronic acid,353.03567,,
+4-Nitrophenol,372.01013,2.8,Negative,,,Glucuronic acid,373.0174,,
+4-Nitrophenol,372.01026,2.51,Negative,,,Glucuronic acid,373.01753,,
+4-Nitrophenol,651.0925,2.93,Negative,,,Glucuronic acid,652.09977,,
+4-Nitrophenol,414.09776,1.1,Negative,Cephalosporin C,HMDB0060450,Glutathione,415.10503,415.1049,0.2
+4-Nitrophenol,174.98735,4.69,Negative,,,Sulfate,175.99463,,
+4-Nitrophenol,201.00262,4.29,Negative,,,Sulfate,202.0099,,
+4-Nitrophenol,201.00263,5.05,Negative,,,Sulfate,202.00991,,
+4-Nitrophenol,233.97141,2.96,Negative,,,Sulfate,234.97869,,
+Phenol,203.00196,2.72,Negative,O-methoxycatechol-O-sulphate | 4-Methylcatechol 1-sulfate | 4-Methylcatechol 2-sulfate | 3-Methylcatechol 1-sulfate | 3-Methylcatechol 2-sulfate | Sulfuric acid 4-methoxyphenyl ester | 3-Methoxyphenol sulfate | 3-Hydroxy-5-methylphenyl sulfate,HMDB0060013 | HMDB0240459 | HMDB0240461 | HMDB0240662 | HMDB0240663 | HMDB0242192 | HMDB0304914 | HMDB0341067,Sulfate,204.00924,204.0092 | 204.0092 | 204.0092 | 204.0092 | 204.0092 | 204.0092 | 204.0092 | 204.0092,0 | 0 | 0 | 0 | 0 | 0 | 0 | 0
+Acetaminophen,457.13871,1.54,Positive,5-S-Glutathionyl-aminochrome reduced | 3-(Glutathion-S-yl)acetaminophen,HMDB0060086 | HMDB0247733,Glutathione,456.13143,456.1315 | 456.1315,0.1 | 0.1
+Chlorzoxazone,384.00941,1.65,Positive,,,Glucuronic acid,383.00214,,
+4-Nitrophenol,338.04852,1.69,Positive,,,Glucuronic acid,337.04124,,
+4-Nitrophenol,360.03015,1.62,Positive,,,Glucuronic acid,359.02288,,
+4-Nitrophenol,526.01398,2.88,Positive,,,Glucuronic acid,525.0067,,
+4-Nitrophenol,697.071,2.13,Positive,,,Glucuronic acid,696.06372,,
+4-Nitrophenol,697.07103,2.65,Positive,,,Glucuronic acid,696.06375,,
+4-Nitrophenol,416.11205,1.16,Positive,Cephalosporin C,HMDB0060450,Glutathione,415.1052,415.1049,0.6
+4-Nitrophenol,264.06895,5.42,Positive,,,Sulfate,263.06167,,
+Phenol,274.09206,1.86,Positive,"(2,5-Dioxopyrrolidin-1-yl) 5-(2-hydroxyethoxy)-4-oxopentanoate",HMDB0242493,Glucuronic acid,273.08478,273.0849,0.3
+Phenol,315.04509,1.31,Positive,,,Glucuronic acid,292.05583,,
+Phenol,416.11171,1.13,Positive,Cephalosporin C,HMDB0060450,Glutathione,415.10443,415.1049,1.2

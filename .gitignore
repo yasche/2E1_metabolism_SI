@@ -1,0 +1,14 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+solvent_inhibition/files/solvents_raw/
+lcms_conjugates/search_hmdb/hmdb_files/
+*.html
+lcms_conjugates/conjugate_screening/lcms_conjugates_files/
+lcms_conjugates/dose_finding/dose_finding_files/
+lcms_conjugates/search_hmdb/search_hmdb_files/
+solvent_inhibition/activity/solvent_inhibition_activity_files/
+solvent_inhibition/dose-finding/dose_finding_files/
+solvent_inhibition/ox_prod_id/ox_prod_id_files/
+western_blot/western_blot_analysis_files/

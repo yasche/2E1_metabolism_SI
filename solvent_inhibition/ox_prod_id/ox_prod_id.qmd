@@ -1,0 +1,320 @@
+---
+title: "Identification of 6-OH chlorzoxazone"
+author: "Yannik Schermer"
+format: 
+  html: 
+    toc: true
+bibliography: references.bib
+---
+
+## Introduction
+
+It has been reported that several organic solvents reduce the activity of CYP2E1 [@hickman]. Therefore, it is tested if this is also the case for Hep-G2-2E1 cells. For this, chlorzoxazone is used as a model compound. The CYP2E1-mediated hydroxylation of chlorzoxazone to form 6-hydroxychlorzoxazone and the subsequent conjugate formation (sulfate and glucuronic acid) in the presence of organic solvents is compared to a solvent-free control. 6-Hydroxychlorzoxazone is identified via injection of an authentic standard while the potential glucuronic acid and sulfate conjugates are putatively annotated via their characteristic neutral losses and by comparing their MS/MS spectra to that of 6-hydroxychlorzoxazone. It is expected that they share some common fragment ions.
+
+This document describes the identification of 6-hydroxychlorzoxazone. First, potential features are extracted. For this, the feature table is filtered to only include features with a mass-to-charge-ratio of 183.980147 +- 5 ppm which corresponds to that of 6-hydroxychlorzoxazone. Next, all features which are also found in controls are excluded. Finally, only features which are found in at least 3/4 of all samples of at least one group are kept.
+
+Identity of the potential metabolite is confirmed by injecting an authentic standard of 6-hydroxychlorzoxazone and comparing retention time, ion mobility and MS/MS spectra.
+
+## Setup
+
+```{r}
+library(metamorphr)
+library(tidyverse)
+library(ggbeeswarm)
+```
+
+## Screen for potential metabolites
+
+### Read featuretable
+
+```{r}
+ft <- read_featuretable("files/rp18_neg_chlorzoxazone.csv", label_col = 1, metadata_cols = 2:3)
+```
+
+#### Create a metadata table
+
+A metadata table is created for the feature tables and then joined to them.
+
+```{r create-metadata-table}
+metadata_table <- create_metadata_skeleton(ft)
+
+metadata_table <- metadata_table %>%
+  mutate(Group = case_when(str_detect(Sample, "^QC_") ~ "QC",
+                           str_detect(Sample, "^B[0-9]{1,}") ~ str_remove_all(
+                             Sample, "^B[0-9]{1,}\\_|\\_[0-9]{1,}\\_[0-9]{1,}\\_[0-9]{1,}\\_[0-9]{1,}$"
+                            ))) %>%
+  mutate(Replicate = case_when(Group != "QC" ~ str_remove_all(
+    Sample, "^B[0-9]{1,}\\_[0-9A-Za-z]{1,}\\_.[0-9A-Za-z]{1,}\\_|\\_[0-9]{1,}\\_[0-9]{1,}\\_[0-9]{1,}$|^B[0-9]{1,}\\_[0-9A-Za-z]{1,}\\_"
+  ),
+  .default = "1")) %>%
+  mutate(Batch = case_when(Sample != "QC" ~ str_extract(Sample, "^B[0-9]{1,}"),
+                           .default = NA))
+```
+
+Join them together.
+
+```{r join-metadata}
+ft <- join_metadata(metadata_table, ft)
+```
+
+#### Filter for potential metabolites
+
+```{r}
+blank_groups <- metadata_table %>%
+  filter(Group != "clox_2e1" & Group != "QC") %>%
+  pull(Group) %>%
+  unique()
+
+ft %>%
+  filter_mz(m_z_col = `m/z`, masses = 183.980147, tolerance = 5, tolerance_type = "ppm") %>%
+  filter(Group != "QC") %>%
+  filter_blank(blank_samples = blank_groups, min_frac = 3, blank_as_group = TRUE, group_column = Group) %>%
+  filter_grouped_mv(min_found = 0.75, group_column = Group, fraction = TRUE) %>%
+  ggplot(aes(Group, Intensity)) +
+    geom_point() +
+    facet_wrap(~Feature, ncol = 1, scales = "free_y") +
+    ylim(c(0, NA))
+```
+
+This approach yields one potential metabolite with an exact mass of 184.98803 Da and a retention time of 187.15 s (3.12 min). The theoretic mass of 6-hydroxychlorzoxazone is 184.98797.
+
+## Confirm identity
+
+An authentic standard of 6-hydroxychlorzoxazone was injected. Identity is confirmed via retention time, ion mobility and MS/MS spectra.
+
+### Retention time
+
+Below is an EIC for mass 183.980 +- 0.05 Da of the whole run time (0-15 min) of Hep-G2-2E1 cells treated with chlorzoxazone.
+
+```{r}
+read_csv("files/chromatog/clox_2e1_1_chr_sg.csv") %>%
+  mutate(`t / min` = `Time [s]` / 60) %>%
+  ggplot(aes(`t / min`, Arb)) +
+    geom_line() +
+    theme_bw()
+```
+
+The region of interest lies between 2.5 and 5 minutes. Therefore, chromatograms are cropped:
+
+```{r}
+crop_rt <- function(chromatog, start, stop) {
+  chromatog %>%
+    mutate(`t / min` = `Time [s]` / 60) %>%
+    filter(`t / min` < stop & `t / min` > start)
+}
+
+read_csv("files/chromatog/clox_2e1_1_chr_sg.csv") %>%
+  crop_rt(start = 2.5, stop = 5) %>%
+  ggplot(aes(`t / min`, Arb)) +
+    geom_line() +
+    theme_bw()
+```
+
+The potential metabolite with a retention time of 3.12 min is part of a double peak. Furthermore, there are 2 additional peaks at around 4 minutes. Next, the chromatogram is compared to that of Hep-G2-wt cells treated with chlorzoxazone and medium containing chlorzoxazone, as well as chromatograms of the authentic standard at 100 nM, 1 uM and 10 uM.
+
+```{r}
+#| fig-height: 9
+#| fig-width: 3.2
+chromatog_dir <- "files/chromatog/"
+chromatog_files <- list.files(chromatog_dir)
+
+chromatog_levels <- c("clox_2e1_1_chr_sg.csv",
+                      "clox_2e1_2_chr_sg.csv",
+                      "clox_2e1_3_chr_sg.csv",
+                      "clox_2e1_4_chr_sg.csv",
+                      "clox_wt_1_chr_sg.csv",
+                      "clox_-2e1_1_chr_sg.csv",
+                      "med_2e1_1.csv",
+                      "med_wt_1.csv",
+                      "6oh-czx_100nM_chr_sg.csv",
+                      "6oh-czx_1uM_chr_sg.csv",
+                      "6oh-czx_10uM_chr_sg.csv")
+
+chromatog_labels <- c("Hep-G2-2E1, Chlorzoxazone, Sample 1",
+                      "Hep-G2-2E1, Chlorzoxazone, Sample 2",
+                      "Hep-G2-2E1, Chlorzoxazone, Sample 3",
+                      "Hep-G2-2E1, Chlorzoxazone, Sample 4",
+                      "Hep-G2-wt, Chlorzoxazone, Sample 1",
+                      "Medium, Chlorzoxazone, Sample 1",
+                      "Hep-G2-2E1, Medium, Sample 1",
+                      "Hep-G2-wt, Medium, Sample 1",
+                      "Standard, 100 nM",
+                      "Standard, 1 uM",
+                      "Standard, 10 uM")
+
+chromatog_list <- paste0(chromatog_dir, chromatog_files) %>%
+  map(read_csv, show_col_types = FALSE) 
+
+names(chromatog_list) <- chromatog_files
+  
+bind_rows(chromatog_list, .id = "file") %>%
+  crop_rt(start = 2.5, stop = 5) %>%
+  mutate(Sample = factor(file, levels = chromatog_levels, labels = chromatog_labels)) %>%
+  ggplot(aes(`t / min`, Arb)) +
+    geom_line() +
+    facet_wrap(~Sample, ncol = 1, scales = "free_y") +
+    ylab("Intensity / a.u.") +
+    theme_bw()
+
+
+ggsave("plots/rt.svg", width = 3.2, height = 9)
+```
+The double peak between 3.1 min and 3.3 min is confirmed to be 6-hydroxychlorzoxazone. The two peaks around 4 min are probably some contamination from chlorzoxazone because they are neither present in the standard nor in Hep-G2-2E1 or Hep-G2-wt cells without chlorzoxazone but are present in Hep-G2-wt cells treated with chlorzoxazone and in medium containing chlorzoxazone without cells.
+
+### Ion mobility
+
+Identity is further confirmed via the measured ion mobility.
+
+```{r}
+#| fig-height: 3
+#| fig-width: 3.2
+mobilog_dir <- "files/mobilog/"
+mobilog_files <- list.files(mobilog_dir)
+
+mobilog_list <- paste0(mobilog_dir, mobilog_files) %>%
+  map(read_csv, show_col_types = FALSE) 
+
+names(mobilog_list) <- mobilog_files
+
+mobilog_levels <- c("clox_2e1_1_mob.csv",
+                    "6oh-czx_1uM_mob.csv")
+
+mobilog_labels <- c("Hep-G2-2E1, Chlorzoxazone, Sample 1",
+                    "Standard, 1 uM")
+
+bind_rows(mobilog_list, .id = "file") %>%
+  mutate(Sample = factor(file, levels = mobilog_levels, labels = mobilog_labels)) %>%
+  ggplot(aes(Mobility, Intensity)) +
+    geom_line() +
+    facet_wrap(~Sample, ncol = 1, scales = "free_y") +
+    ylab("Intensity / a.u.") +
+    theme_bw()
+
+ggsave("plots/mob.svg", height = 3, width = 3.2)
+```
+
+
+The peaks between 3.1 min and 3.3 min from the above section show the same ion mobility for a 1 uM 6-hydroxychlorzoxazone standard and a representative sample of Hep-G2-2E1 cells treated with chlorzoxazone.
+
+### MS/MS
+
+Finally, identity is also confirmed by comparing MS/MS spectra of the peaks between 3.1 min and 3.3 min.
+
+```{r}
+#| fig-height: 3.5
+#| fig-width: 4
+# from https://stackoverflow.com/questions/32123288/position-ggplot-text-in-each-corner
+annotations <- tibble(
+        xpos = c(Inf, Inf),
+        ypos =  c(-Inf, Inf),
+        annotateText = c("Standard, 1 uM", "Hep-G2-2E1, Chlorzoxazone, Sample 1"),
+        hjustvar = c(1, 1) ,
+        vjustvar = c(-0.5, 1.2))
+
+read_mgf("files/msms/msms_spectra_converted.mgf") %>%
+  unnest(MSn) %>%
+  filter(`m_z` < 200) %>%
+  group_by(TITLE) %>%
+  mutate(max_int = max(Intensity)) %>%
+  ungroup() %>%
+  mutate(`Relative Intensity` = Intensity / max_int * 100) %>%
+    mutate(`Relative Intensity` = case_when(TITLE == "Standard, 1 uM" ~ -`Relative Intensity`,
+                               .default = `Relative Intensity`)) %>%
+  ggplot(aes(x = `m_z` , ymax = `Relative Intensity`, ymin = 0)) +
+    geom_linerange() +
+    theme_bw() +
+    geom_hline(yintercept = 0, color = "grey60") +
+    ylab("Relative Intensity / a.u.") +
+    xlab("m/z") +
+    geom_text(data = annotations, aes(x = xpos, y = ypos, hjust = hjustvar, vjust = vjustvar, label = annotateText), inherit.aes = FALSE)
+
+ggsave("plots/msms_czx.svg", width = 4, height = 3.5)
+```
+MS/MS spectrum fits.
+
+## Compare MS/MS spectra of the potential sulfate and glucuronic acid conjugates to that of 6-hydroxychlorzoxazone
+
+MS/MS spectra were exported from MetaboScape for conjugates that were putatively annotated via their exact mass and neutral losses. Also, they were only found in Hep-G2-2E1 and not Hep-G2-wt.
+
+### Standard
+
+Read the MS/MS spectrum of the authentic 6-hydroxychlorzoxazone standard.
+
+```{r}
+msms_standard <- read_mgf("files/msms/msms_spectra_converted.mgf") %>%
+  unnest(MSn) %>%
+  filter(`m_z` < 200) %>%
+  filter(TITLE == "Standard, 1 uM") %>%
+  select(TITLE, m_z, Intensity) %>%
+  mutate(Intensity = Intensity / max(Intensity) * -100)
+```
+
+### Sulfate
+
+Read the MS/MS spectrum and clean it.
+
+```{r}
+msms_sulfate <- read_delim("files/msms/msms_pot_sulfate.txt", delim = "\t") %>%
+  transmute(TITLE = "Potential Sulfate Conjugate",
+            m_z,
+            Intensity = Intensity / max(Intensity) * 100)
+
+
+annotations <- tibble(
+        xpos = c(Inf, Inf),
+        ypos =  c(-Inf, Inf),
+        annotateText = c("6-Hydroxychlorzoxazone Standard, 1 uM", "Potential Sulfate Conjugate"),
+        hjustvar = c(1, 1) ,
+        vjustvar = c(-0.5, 1.2))
+
+rbind(msms_standard,
+      msms_sulfate) %>%
+  ggplot(aes(x = `m_z` , ymax = Intensity, ymin = 0)) +
+    geom_linerange() +
+    theme_bw() +
+    geom_hline(yintercept = 0, color = "grey60") +
+    ylab("Relative Intensity / a.u.") +
+    xlab("m/z") +
+    geom_text(data = annotations, aes(x = xpos, y = ypos, hjust = hjustvar, vjust = vjustvar, label = annotateText), inherit.aes = FALSE)
+
+ggsave("plots/msms_sulfate.svg", width = 8, height = 3.5)
+```
+
+
+### Glucuronide
+
+Read the MS/MS spectrum and clean it.
+
+```{r}
+msms_glcac <- read_delim("files/msms/msms_pot_glcac.txt", delim = "\t") %>%
+  transmute(TITLE = "Potential Glucuronic Acid Conjugate",
+            m_z,
+            Intensity = Intensity / max(Intensity) * 100)
+
+
+annotations <- tibble(
+        xpos = c(Inf, Inf),
+        ypos =  c(-Inf, Inf),
+        annotateText = c("6-Hydroxychlorzoxazone Standard, 1 uM", "Potential Glucuronic Acid Conjugate"),
+        hjustvar = c(1, 1) ,
+        vjustvar = c(-0.5, 1.2))
+
+rbind(msms_standard,
+      msms_glcac) %>%
+  ggplot(aes(x = `m_z` , ymax = Intensity, ymin = 0)) +
+    geom_linerange() +
+    theme_bw() +
+    geom_hline(yintercept = 0, color = "grey60") +
+    ylab("Relative Intensity / a.u.") +
+    xlab("m/z") +
+    geom_text(data = annotations, aes(x = xpos, y = ypos, hjust = hjustvar, vjust = vjustvar, label = annotateText), inherit.aes = FALSE)
+
+ggsave("plots/msms_glcac.svg", width = 8, height = 3.5)
+```
+## Session Info
+
+```{r}
+devtools::session_info()
+```
+
+## References

@@ -1,0 +1,93 @@
+---
+title: "Western blot analysis"
+author: "Yannik Schermer"
+format: 
+  html:
+    toc: true
+---
+
+## Introduction
+
+Semi-quantitation was done in ImageJ 1.54g according to this protocol: https://www.yorku.ca/yisheng/Internal/Protocols/ImageJ.pdf
+
+## Analysis
+
+### Setup
+
+```{r}
+library(tidyverse)
+```
+
+### Read files
+
+```{r}
+folder <- "intensities"
+
+wb_intensities <- paste0(folder, "/", list.files(folder)) |>
+  purrr::map(read_csv, show_col_types = FALSE)
+```
+
+### Invert values
+
+```{r}
+wb_intensities <- wb_intensities |>
+  purrr::map(mutate, Inverted_Background = 255 - Background) |>
+  purrr::map(mutate, Inverted_Band = 255 - Band)
+```
+
+### Subtract background
+
+```{r}
+wb_intensities <- wb_intensities |>
+  purrr::map(mutate, Background_corrected = Inverted_Band - Inverted_Background)
+```
+
+### Normalize to Hsp90 and to mean
+
+```{r}
+wb_intensities <- wb_intensities |>
+  purrr::map(select, -Band, -Background, -Inverted_Band, -Inverted_Background)
+
+intensities_cyp <- wb_intensities[[1]] |>
+  rename(Intensity_CYP = Background_corrected)
+
+intensities <- wb_intensities[[2]] |>
+  rename(Intensity_Hsp = Background_corrected) |>
+  right_join(intensities_cyp, by = join_by(Line, Passage, Replicate)) |>
+  mutate(Normalized = Intensity_CYP / Intensity_Hsp) |>
+  group_by(Replicate) |>
+  mutate(Mean = mean(Normalized)) |>
+  ungroup() |>
+  mutate(Normalized = Normalized / Mean) |>
+  mutate(Line = case_when(Line == "WT" ~ "wt",
+                          Line == "CYP2E1"  ~ "2E1",
+                          .default = Line)) |>
+  mutate(Line = paste0("Hep-G2-", Line)) |>
+  mutate(`Cell line` = Line)
+```
+
+
+### Plot
+
+```{r}
+intensities_mean <- intensities |>
+  group_by(`Cell line`, Passage) |>
+  summarise(Normalized = mean(Normalized)) |>
+  ungroup()
+
+ggplot(intensities_mean, aes(Passage, Normalized, colour = `Cell line`)) +
+  geom_point(shape = 4, size = 3) +
+  ylab("Relative CYP2E1 Intensity / a.u.") +
+  xlab("Passage Number") +
+  geom_line() +
+  geom_point(data = intensities, aes(Passage, Normalized, colour = `Cell line`), alpha = 0.3, size = 2) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+ggsave("plots/wb_plot.svg", width = 6, height = 3.3)
+```
+
+## Session Info
+```{r}
+devtools::session_info()
+```

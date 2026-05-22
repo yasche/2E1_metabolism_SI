@@ -1,0 +1,322 @@
+---
+title: "Dose-finding for conjugate screening via LC-MS/MS"
+author: "Yannik"
+format: 
+  html:
+    toc: true
+---
+
+## Introduction
+
+This document contains the code for the analysis of dose-finding experiments for the following compounds in both, Hep-G2 wildtype cells (Hep-G2-wt) and genetically modified Hep-G2 cells expressing Cytochrome P450 2E1 (Hep-G2-2E1):
+
+-   acrylamide
+
+-   acetaminophen
+
+-   chlorzoxazone
+
+-   phenol
+
+-   4-nitrophenol
+
+## Data Cleaning and Normalization
+
+Raw data was cleaned and Relative viability was calculated using @eq-normalization-1
+
+$$ Relative\:viability /\%= \frac{E_T-E_B}{E_N-E_B}\cdot100\:\%$$ {#eq-normalization-1} with
+
+$E_T$ Extinction treated well
+
+$E_B$ Extinction blank
+
+$E_N$ Extinction negative control (medium)
+
+
+## Setup
+
+```{r,output=FALSE}
+library(drc)
+library(tidyverse)
+library(scales)
+```
+
+The following function is used to model dose-response curves. 
+
+```{r, warning=FALSE}
+#catch error if fit fails
+safe_drc <- safely(drm)
+
+
+drc_pipe <- function(dataframe, output_list, compound_name = "", background = "", lowest_conc_CI, highest_conc_CI, lower_limit_drm = c(NA, NA, NA, NA), upper_limit_drm = c(NA, NA, NA, NA), ec_level = 30, show = "all", ylim_plot = c(0, NA), y_axis_breaks = seq(0, 150, 25)){
+
+  #model data
+  drc <- dataframe %>%
+    safe_drc(viab ~ c_nM, fct = LL.4(), lowerl = lower_limit_drm, upperl = upper_limit_drm, data = .)
+  
+  if (is_null(drc$result) == FALSE) {
+  drc <- drc$result
+    #calculate EC
+    calculated_ec <- drc %>%
+      ED(respLev = ec_level, interval = "delta", display = F)
+    
+    # For a prettier plot, data is normalized a second time using the upper and lower plateau of the first fit.
+    # This ensures that upper plateau is always 100 % and the lower is 0 %.
+    # Slope and Hill Coefficient are preserved to ensure that the curve shape does not change.
+    # For reference, see https://www.graphpad.com/support/faq/50-of-what-how-exactly-are-ic50-and-ec50-defined/
+    
+    
+    # Fitting normalized data.
+    
+    #Subtract 0 line
+    upper_plateau <- unname(drc$coefficients[3])
+    lower_plateau <- unname(drc$coefficients[2])
+    hill_coeff <- unname(drc$coefficients[1])
+    ec50 <- unname(drc$coefficients[4])
+    
+    dataframe$viab <- dataframe$viab-lower_plateau
+    
+    drc <- dataframe %>%
+      drm(viab ~ c_nM, fct = LL.4(fixed = c(hill_coeff, NA, NA, ec50)), data = .)
+    
+    
+    #Scale to 100%
+    upper_plateau <- unname(drc$coefficients[2])
+    lower_plateau <- unname(drc$coefficients[1])
+    
+    dataframe$viab <- dataframe$viab/upper_plateau*100
+    
+    drc <- dataframe %>%
+      drm(viab ~ c_nM, fct = LL.4(fixed = c(hill_coeff, NA, NA, ec50)), data = .)
+    
+    #draw DRC with  95 %-CI
+    modeled_df <- expand.grid(conc = exp(seq(log(lowest_conc_CI), log(highest_conc_CI), length = 10000)))
+    modeled_df[,c(2,3,4)] <- drc %>%
+      predict(newdata = modeled_df, interval = "confidence")
+    
+    if (show == "all") {
+      show_df <- dataframe
+    } else if (show == "mean"){
+      show_df<- dataframe %>%
+        group_by(c_nM) %>%
+        summarize(viab = mean(viab, na.rm=TRUE))
+    } else {
+      print("show must be 'mean' or 'all'")
+    }
+  
+    output_list$EC.values[nrow(output_list$EC.values)+1,1] <- compound_name
+    output_list$EC.values[nrow(output_list$EC.values),2] <- background
+    output_list$EC.values[nrow(output_list$EC.values),3] <- calculated_ec[[1]]
+    output_list$EC.values[nrow(output_list$EC.values),4] <- ec_level
+    
+    modeled_df <- as_tibble(modeled_df)
+    colnames(modeled_df) <- c("conc", "viab", "upper", "lower")
+    
+    modeled_df <- modeled_df %>%
+      mutate(cpd = compound_name,
+             background = background)
+    
+    output_list$dfs$modeled_df <- rbind(output_list$dfs$modeled_df, 
+                                        modeled_df)
+    
+    show_df <- as_tibble(show_df)
+    colnames(show_df) <- c("conc", "viab")
+    
+    show_df <- show_df %>%
+      mutate(cpd = compound_name,
+             background = background)
+    
+    output_list$dfs$points_df <- rbind(output_list$dfs$points_df, 
+                                       show_df)
+  
+  
+  } else {
+  #return only points df & EC info if fit fails 
+  
+    if (show == "all") {
+      show_df <- dataframe
+    } else if (show == "mean"){
+      show_df<- dataframe %>%
+        group_by(c_nM) %>%
+        summarize(viab = mean(viab, na.rm=TRUE))
+    } else {
+      print("show must be 'mean' or 'all'")
+    }
+    
+    output_list$EC.values[nrow(output_list$EC.values)+1,1] <- compound_name
+    output_list$EC.values[nrow(output_list$EC.values),2] <- background
+    output_list$EC.values[nrow(output_list$EC.values),3] <- NA
+    output_list$EC.values[nrow(output_list$EC.values),4] <- ec_level
+    
+    show_df <- as_tibble(show_df)
+    colnames(show_df) <- c("conc", "viab")
+    
+    show_df <- show_df %>%
+      mutate(cpd = compound_name,
+             background = background)
+    
+    output_list$dfs$points_df <- rbind(output_list$dfs$points_df, 
+                                       show_df)
+    
+  }
+  
+  output_list
+}
+```
+
+
+Plots and calculated IC~10~ values are appended to a pre existing list by the above function. This simple helper function creates a list with the correct formatting.
+
+
+```{r}
+make_output_list <- function() {
+  ec_values <- tibble(
+    Compound = character(),
+    Background = character(),
+    EC = numeric(),
+    EC.level = numeric()
+  )
+  dfs <- list(
+    modeled_df = tibble(
+      conc = numeric(),
+      viab = numeric(),
+      upper = numeric(),
+      lower = numeric(),
+      cpd = character(),
+      background = character()
+    ),
+    points_df = tibble(
+      conc = numeric(),
+      viab = numeric(),
+      upper = numeric(),
+      lower = numeric(),
+      cpd = character(),
+      background = character()
+    )
+  )
+  #dfs <- list()
+  output_list <- list(ec_values, dfs)
+  
+  names(output_list) <- c("EC.values", "dfs")
+  
+  return(output_list)
+}
+
+output_list <- make_output_list()
+
+output_list
+
+```
+
+
+## Analysis
+
+### Read data
+
+```{r}
+aa_2e1 <- read_csv("input/aa_2e1_2h.csv", show_col_types = FALSE)
+aa_wt <- read_csv("input/aa_wt_2h.csv", show_col_types = FALSE)
+
+cl_2e1  <- read_csv("input/cl_2e1_2h.csv", show_col_types = FALSE)
+cl_wt   <- read_csv("input/cl_wt_2h.csv", show_col_types = FALSE)
+
+para_2e1  <- read_csv("input/para_2e1_2h.csv", show_col_types = FALSE)
+para_wt   <- read_csv("input/para_wt_2h.csv", show_col_types = FALSE)
+
+phenol_2e1  <- read_csv("input/phenol_2e1_2h.csv", show_col_types = FALSE)
+phenol_wt   <- read_csv("input/phenol_wt_2h.csv", show_col_types = FALSE)
+
+pnp_2e1 <- read_csv("input/pnp_2e1_2h.csv", show_col_types = FALSE)
+pnp_wt  <- read_csv("input/pnp_wt_2h.csv", show_col_types = FALSE)
+```
+
+### Model curves
+
+```{r, warning=FALSE}
+output_list <- drc_pipe(dataframe = para_2e1, compound_name ="Acetaminophen", background = "2E1", lowest_conc_CI = 1, highest_conc_CI = 1000000000, show = "mean", lower_limit_drm = c(NA, -10, 80, NA), upper_limit_drm = c(NA, 10, 120, NA),  output_list = output_list)
+
+output_list <- drc_pipe(dataframe = para_wt, compound_name ="Acetaminophen", background = "wt", lowest_conc_CI = 1, highest_conc_CI = 1000000000, show = "mean", lower_limit_drm = c(NA, -10, 80, NA), upper_limit_drm = c(NA, 10, 120, NA), output_list = output_list)
+
+
+output_list <- drc_pipe(dataframe = aa_2e1, compound_name ="Acrylamide", background = "2E1", lowest_conc_CI = 1, highest_conc_CI = 1000000000, show = "mean", lower_limit_drm = c(NA, -10, 80, NA), upper_limit_drm = c(NA, 10, 120, NA),  output_list = output_list)
+
+output_list <- drc_pipe(dataframe = aa_wt, compound_name ="Acrylamide", background = "wt", lowest_conc_CI = 1, highest_conc_CI = 1000000000, show = "mean", lower_limit_drm = c(NA, -10, 80, NA), upper_limit_drm = c(NA, 10, 120, NA), output_list = output_list)
+
+
+output_list <- drc_pipe(dataframe = cl_2e1, compound_name ="Chlorzoxazone", background = "2E1", lowest_conc_CI = 1, highest_conc_CI = 1000000000, show = "mean", lower_limit_drm = c(NA, -10, 80, NA), upper_limit_drm = c(NA, 10, 120, NA),  output_list = output_list)
+
+output_list <- drc_pipe(dataframe = cl_wt, compound_name ="Chlorzoxazone", background = "wt", lowest_conc_CI = 1, highest_conc_CI = 1000000000, show = "mean", lower_limit_drm = c(NA, -10, 80, NA), upper_limit_drm = c(NA, 10, 120, NA), output_list = output_list)
+
+
+output_list <- drc_pipe(dataframe = phenol_2e1, compound_name ="Phenol", background = "2E1", lowest_conc_CI = 1, highest_conc_CI = 1000000000, show = "mean", lower_limit_drm = c(NA, -10, 80, NA), upper_limit_drm = c(NA, 10, 120, NA),  output_list = output_list)
+
+output_list <- drc_pipe(dataframe = phenol_wt, compound_name ="Phenol", background = "wt", lowest_conc_CI = 1, highest_conc_CI = 1000000000, show = "mean", lower_limit_drm = c(NA, -10, 80, NA), upper_limit_drm = c(NA, 10, 120, NA), output_list = output_list)
+
+
+output_list <- drc_pipe(dataframe = pnp_2e1, compound_name ="4-Nitrophenol", background = "2E1", lowest_conc_CI = 1, highest_conc_CI = 1000000000, show = "mean", lower_limit_drm = c(NA, -10, 80, NA), upper_limit_drm = c(NA, 10, 120, NA), output_list = output_list)
+
+output_list <- drc_pipe(dataframe = pnp_wt, compound_name ="4-Nitrophenol", background = "wt", lowest_conc_CI = 1, highest_conc_CI = 1000000000, show = "mean", lower_limit_drm = c(NA, -10, 80, NA), upper_limit_drm = c(NA, 10, 120, NA), output_list = output_list)
+```
+
+
+### Visualize
+
+```{r}
+#| fig-height: 10
+#| fig-width: 7
+ggplot() +
+    geom_line(data = output_list$dfs$modeled_df, aes(conc, viab)) +
+    scale_x_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
+                  labels = scales::trans_format("log10", scales::math_format(10^.x))) +
+    geom_line(data = output_list$dfs$modeled_df, aes(x = conc, y = upper), alpha = 0.2, linetype = "dashed") +
+    geom_line(data = output_list$dfs$modeled_df, aes(x = conc, y = lower), alpha = 0.2, linetype = "dashed") +
+    #scale_y_continuous() +
+    ylim(c(0, 150)) + 
+    geom_point(data = output_list$dfs$points_df, aes(conc, viab))+
+    theme_bw() +
+    annotation_logticks(sides = "b") +
+    facet_wrap(~cpd + background, ncol = 2)
+```
+
+
+
+## Summary
+
+IC~30~ were calculated for each compound in both cell lines (i.e., Hep-G2-wt and Hep-G2-2E1) and the lower values were used for metabolomics experiments. For example, the compound 4-nitrophenol has an IC~30~ of 1.91 mM in Hep-G2-wt and 8.46 mM in Hep-G2-2E1. 1.91 mM is the lower concentration so it is used for metabolomics experiments. If no IC~30~ could be calculated, the highest tested concentration is used. Estimated concentrations are summarized in [@tbl-final].
+
+
+For each compound, the smallest concentration that causes a 30 % reduction 
+
+```{r, echo=FALSE}
+#| label: tbl-final
+#| tbl-cap: "IC~10~ values used for metabolomics experiments."
+
+max_c <- tibble(
+  Compound = c("Acetaminophen", "Acrylamide", "Chlorzoxazone", "Phenol", "4-Nitrophenol"),
+  max_c = c(3e6, 10e6, 3e6, 10e6, 10e6)
+)
+
+
+output_list$EC.values %>%
+  left_join(max_c, by = "Compound") %>%
+  mutate(EC = case_when(is.na(EC) ~ max_c,
+                        .default = EC)) %>%
+  mutate(EC = case_when(EC > max_c ~ max_c,
+                        .default = EC)) %>%
+  group_by(Compound) %>%
+  summarise(EC = min(EC)) %>%
+  ungroup() %>%
+  mutate(EC = EC / 1e6) %>%
+  mutate(EC = signif(EC, 3)) %>%
+  transmute(Compound = Compound,
+            `IC / mM` = EC) %>%
+  knitr::kable(align = "c")
+  
+```
+
+## Session Info
+
+```{r}
+devtools::session_info()
+```
+

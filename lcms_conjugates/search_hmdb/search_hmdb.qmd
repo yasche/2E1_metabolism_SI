@@ -1,0 +1,130 @@
+---
+title: "Search HMDB"
+author: "Yannik Schermer"
+format: 
+  html:
+    toc: true
+bibliography: references.bib
+---
+
+## Introduction
+
+The Human Metabolome Database (HMDB) [@wishart2007] [@wishart2022] is searched for the exact masses of the features extracted in "Conjugate Screening" to potentially identify unknown features. For this, a list of all known and predicted human metabolites was obtained from HMDB (248,373 entries) and is searched with 5 ppm tolerance (± 2.5 ppm).
+
+### Important Note
+
+Note that the list of metabolites is not re-distributed with this file and if this file should be re-rendered locally, a list of metabolites must first be obtained from HMDB and placed in the `hmdb_files` folder. The list can be obtained from https://www.hmdb.ca/metabolites via the Export button, without filters selected.
+
+## Setup
+
+```{r}
+library(tidyverse)
+```
+
+## Read Files
+
+### Read the metabolites list
+
+This file must be obtained from HMDB and placed in the `hmdb_files` folder. See the [Important Note] section.
+
+```{r}
+hmdb_file_folder <- "hmdb_files/"
+hmdb_file_loc <- paste0(hmdb_file_folder, list.files(hmdb_file_folder))
+
+hmdb_metabolites <- read_csv(hmdb_file_loc)
+```
+
+### Read the feature tables
+
+```{r}
+ft_files_folder <- "files/"
+ft_files_names <- list.files(ft_files_folder)
+ft_files_loc <- paste0(ft_files_folder, ft_files_names)
+
+ft_files_wide <- ft_files_loc |>
+  map(read_csv, show_col_types = FALSE, col_types = "cdd")
+
+names(ft_files_wide) <- ft_files_names
+
+ft_long <- ft_files_wide |>
+  map(select, 1:3) |>
+  bind_rows(.id = "file_name") |>
+  mutate(file_name = str_remove_all(file_name, "\\.csv$")) |>
+  mutate(polarity = str_extract(file_name, "^[a-z]{3}")) |>
+  mutate(compound = str_remove_all(str_extract(file_name, "\\_[a-z]{1,}\\_"), "_")) |>
+  mutate(conjugate = str_extract(file_name, "[a-z]{1,}$")) |>
+  mutate(exact_mass = as.numeric(str_extract(Feature, "^[0-9]{1,}\\.[0-9]{1,}")))
+```
+
+
+## Search HMDB
+
+```{r}
+search_ms1 <- function(mass, db, tol) {
+  tol_ppm = mass * tol / 1000000
+  
+  filtered <- db |>
+    mutate(near = near(MONO_MASS, mass, tol = tol_ppm)) |>
+    filter(near == TRUE) 
+  
+  tibble(Name = filtered |> 
+           pull(NAME) |>
+           paste(collapse = " | "),
+         HMDB = filtered |> 
+           pull(HMDB_ID) |>
+           paste(collapse = " | "),
+         Measured_Mass = round(mass, digits = 4), 
+         Nominal = filtered |> 
+           pull(MONO_MASS) |>
+           round(digits = 4) |>
+           paste(collapse = " | "),
+         Deviation = filtered |> 
+           mutate(dev = abs(round((mass - MONO_MASS) / MONO_MASS * 1000000, digits = 1)))|> 
+           pull(dev) |>
+           paste(collapse = " | "))
+}
+
+search_ms1(327.0951, hmdb_metabolites, tol = 2.5)
+
+ft_results <- ft_long |>
+  mutate(match = map(exact_mass, search_ms1, hmdb_metabolites, 2.5)) |>
+  unnest(match)
+```
+
+## Tidy and write results do disk
+
+```{r}
+ft_results_tidy <- ft_results |>
+  mutate(compound = str_to_title(compound)) |>
+  transmute(
+    `Treatment Compound` = compound,
+    `m/z` = `m/z`,
+    RT = RT,
+    Polarity = polarity,
+    Name = Name,
+    HMDB = HMDB,
+    `Probable Conjugate` = conjugate,
+    `Measured Mass / Da` = exact_mass,
+    `Theoretical Mass / Da` = Nominal,
+    `Absolute Deviation / ppm` = Deviation
+  ) |>
+  mutate(`Treatment Compound` = case_when(`Treatment Compound` == "Nitrophenol" ~ "4-Nitrophenol",
+                                          .default = `Treatment Compound`)) |>
+  mutate(Polarity = str_replace_all(Polarity, "neg", "Negative"),
+         Polarity = str_replace_all(Polarity, "pos", "Positive")) |>
+  mutate(`Probable Conjugate` = case_when(`Probable Conjugate` == "glcac" ~ "Glucuronic acid",
+                                          `Probable Conjugate` == "gsh" ~ "Glutathione",
+                                          `Probable Conjugate` == "sulfate" ~ "Sulfate"))
+
+knitr::kable(ft_results_tidy)
+
+write_csv(ft_results_tidy, "output/hmdb_matching.csv")
+```
+
+## Session Info
+
+```{r}
+devtools::session_info()
+```
+
+## References

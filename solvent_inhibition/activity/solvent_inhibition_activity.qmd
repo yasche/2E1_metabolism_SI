@@ -1,0 +1,472 @@
+---
+title: "Solvent Inhibition"
+author: "Yannik Schermer"
+format: 
+  html: 
+    toc: true
+---
+
+## Introduction
+
+To asses the impact of organic solvents on the activity of drug-metabolizing enzymes in Hep-G2-2E1, cells were co-incubated with chlorzoxazone and a solvent and the formation of 6-hydroxychlorzoxazone and its sulfate and glucuronic acid conjugates was assessed. 6-hydroxychlorzoxazone concentration was measured using external calibration while its sulfate and glucuronic acid conjugates were semi-quantitated using peak are. All values are expressed relative to a control without organic solvent.
+
+
+## Setup
+
+```{r}
+library(tidyverse)
+```
+
+## Calculate inhibition
+
+### 6-Hydroxychlorzoxazone
+
+#### Clean data
+
+```{r}
+czx <- read_csv("files/quant/260220_2e1_solvent_inhibition_6-hydroxychlorzoxazone_CalibrationDataPoint.csv", show_col_types = FALSE) 
+
+head(czx)
+```
+
+```{r}
+clean_data <- function(data) {
+  data %>%
+    mutate(Quantity = case_when(Quantity == "n.a." ~ NA,
+                                .default = Quantity)) %>%
+    mutate(Quantity = str_remove_all(Quantity, " units")) %>%
+    mutate(Quantity = as.numeric(Quantity)) %>%
+    filter(!str_detect(`Active Data Point`, "Blank")) %>%
+    filter(!str_detect(`Active Data Point`, "cal_")) %>%
+    select(`Active Data Point`, Quantity) %>%
+    mutate(sample = str_remove_all(`Active Data Point`, "^[0-9]{1,}\\_{0,}perc\\_{0,}")) %>%
+    # manually change buoh sample name
+    mutate(sample = case_when(sample == "buoh_1_38_1_15399" ~ "buoh_2_38_1_15399",
+                              sample == "buoh_1_39_1_15400" ~ "buoh_3_39_1_15400",
+                              sample == "buoh_1_40_1_15401" ~ "buoh_4_40_1_15401",
+                              .default = sample)) %>%
+    # manually change acn sample name
+    mutate(sample = case_when(sample == "acn_1_94_1_15501" ~ "acn_2_94_1_15501",
+                              sample == "acn_1_95_1_15502" ~ "acn_3_95_1_15502",
+                              sample == "acn_1_96_1_15503" ~ "acn_4_96_1_15503",
+                              .default = sample))
+}
+
+czx_cleaned <- clean_data(czx) 
+```
+
+Visualize QC:
+
+```{r}
+viz_qc <- function(data) {
+  data %>%
+    filter(str_detect(sample, "^QC")) %>%
+    mutate(meas_order = as.factor(as.integer(str_extract(sample, "[0-9]{1,}$")))) %>%
+    ggplot(aes(meas_order, Quantity)) +
+      geom_point() +
+      ylim(0,NA)
+}
+
+viz_qc(czx_cleaned)
+```
+
+No apparent trend.
+
+
+
+```{r}
+solvent_lookup = c("acetone" = "Acetone",
+                   "acn" = "Acetonitrile",
+                   "buoh" = "1-Butanol",
+                   "ctrl" = "Control",
+                   "dmf" = "N,N-Dimethyl-formamide",
+                   "dmso" = "Dimethyl sulfoxide",
+                   "etoh" = "Ethanol",
+                   "ipa" = "2-Propanol",
+                   "meoh" = "Methanol")
+
+extract_metadata <- function(data) {
+  data %>%
+    filter(!str_detect(sample, "^QC")) %>%
+    mutate(sample = str_extract(sample, "^[a-z]{1,}\\_[0-9]{1,}")) %>%
+    mutate(conc = str_extract(`Active Data Point`, "^[0-9]{1,}")) %>%
+    mutate(conc = case_when(conc == "1" ~ 1,
+                          conc == "01" ~ 0.1,
+                          .default = NA)) %>%
+    mutate(solvent = str_extract(sample, "^[a-z]{1,}")) %>%
+    mutate(solvent_pretty = str_replace_all(solvent, solvent_lookup))
+}
+
+czx_cleaned <- extract_metadata(czx_cleaned)
+
+head(czx_cleaned)
+```
+
+#### Normalize to protein amount
+
+```{r}
+x1perc <- read_csv("files/bradford/bradford_solvent_1perc.csv") %>%
+  mutate(conc = 1)
+
+x0p1perc <- read_csv("files/bradford/bradford_solvent_01perc.csv") %>%
+  mutate(conc = 0.1)
+
+prot_content <- rbind(
+  x1perc,
+  x0p1perc
+)
+
+normalize_to_prot <- function(data, prot) {
+  data %>%
+    left_join(prot, by = c("sample", "conc")) %>%
+    mutate(norm_quant = Quantity / protein) %>%
+    arrange(conc, sample)
+}
+
+czx_cleaned <- normalize_to_prot(czx_cleaned, prot_content)
+  
+
+head(czx_cleaned)
+```
+
+#### Normalize to control
+
+```{r}
+normalize_to_ctrl <- function(data) {
+  ctrl_1perc <- data %>%
+    filter(solvent == "ctrl" & conc == 1) %>%
+    group_by(conc) %>%
+    summarise(quant_ctrl = mean(norm_quant))
+
+  ctrl_0p1perc <- data %>%
+    filter(solvent == "ctrl" & conc == 0.1) %>%
+    group_by(conc) %>%
+    summarise(quant_ctrl = mean(norm_quant))
+
+
+  ctrl_quant <- rbind(
+    ctrl_1perc,
+    ctrl_0p1perc
+  )
+
+  data %>%
+    left_join(ctrl_quant, by = "conc") %>%
+    mutate(rel_quant = norm_quant / quant_ctrl * 100)
+
+}
+
+czx_cleaned <- normalize_to_ctrl(czx_cleaned)
+
+head(czx_cleaned)
+```
+
+#### Summarize
+
+##### Plot
+
+```{r}
+czx_cleaned_mean <- czx_cleaned %>%
+  group_by(solvent_pretty, conc) %>%
+  summarise(rel_quant = mean(rel_quant)) %>%
+  ungroup()
+
+czx_cleaned %>%
+  filter(solvent_pretty != "Control") %>%
+  ggplot(aes(as.factor(conc), rel_quant)) +
+    ggbeeswarm::geom_beeswarm(alpha = 0.2, cex = 5, size = 2) +
+    stat_summary(fun = mean, geom = "crossbar", linewidth = 0.4, width = 0.4, color = "black") +
+    ylim(0, NA) +
+    xlab("Solvent concentration / %") +
+    ylab("6-OH-CZX conentration in % relative to control") +
+    facet_wrap(~str_wrap(solvent_pretty, width = 15, whitespace_only = FALSE), ncol = 2) +
+    theme_bw()
+```
+##### Table
+
+Calculate p values via one-sided, unpaired t-test.
+
+```{r}
+calc_p_val_helper <- function(data, ...) {
+  g1 <- data$rel_quant
+  g2 <- data$rel_quant_ctrl
+  
+  test_stat <- t.test(g1, g2, ...)
+  
+  test_stat$p.value
+}
+
+calc_p_val_helper <- function(data, ...) {
+  xval <- data$rel_quant
+  
+  test_stat <- t.test(xval, mu = 100, ...)
+  
+  test_stat$p.value
+}
+
+calc_p_val <- function(data, ...) {
+  data <- data %>%
+    mutate(sample_no = str_extract(sample, "[0-9]{1,}$"))
+    
+  ctrl_0p1_all <- data %>%
+    filter(conc == 0.1 & solvent == "ctrl") %>%
+    transmute(conc,
+              sample_no,
+              norm_quant_ctrl = norm_quant,
+              rel_quant_ctrl = rel_quant)
+  
+  ctrl_1_all <- data %>%
+    filter(conc == 1 & solvent == "ctrl")%>%
+    transmute(conc,
+              sample_no,
+              norm_quant_ctrl = norm_quant,
+              rel_quant_ctrl = rel_quant)
+  
+  ctrl_all <- rbind(ctrl_0p1_all,
+                    ctrl_1_all)
+  
+  
+  data %>%
+    left_join(ctrl_all, by = c("conc", "sample_no")) %>%
+    group_by(conc, solvent, solvent_pretty) %>%
+    nest() %>%
+    mutate(p = unlist(map(data, calc_p_val_helper#, alternative = "less" # Change to two-sided because solvents have been reported to activate some p II enzymes
+                          , ...))) %>%
+    mutate(significant = case_when(p < 0.05 ~ "*",
+                                   .default = "")) %>%
+    unnest(data) %>%
+    #left_join(ctrl_quant, by = "conc") %>%
+    #mutate(rel_quant = norm_quant / quant_ctrl * 100) %>%
+    group_by(solvent, conc, p, significant, solvent_pretty) %>%
+    summarise(mean_rel_quant = mean(rel_quant),
+              sd_rel_quant =sd(rel_quant)) %>%
+    ungroup() %>%
+    filter(solvent != "ctrl") %>%
+    mutate(p_print = as.character(format(round(p, 3), nsmall = 3))) %>%
+    mutate(p_print = case_when(p_print == "0.000" ~ "< 0.001",
+                               .default = p_print))
+}
+
+czx_cleaned_summarized <- calc_p_val(czx_cleaned)
+
+czx_cleaned_summarized
+```
+
+##### Plot with p value
+
+```{r}
+#| fig-width: 2.8
+#| fig-height: 6
+czx_cleaned %>%
+  filter(solvent_pretty != "Control") %>%
+  ggplot(aes(as.factor(conc), rel_quant)) +
+    ggbeeswarm::geom_beeswarm(alpha = 0.2, cex = 5, size = 2) +
+    stat_summary(fun = mean, geom = "crossbar", linewidth = 0.4, width = 0.4, color = "black") +
+    geom_text(data = mutate(czx_cleaned_summarized,
+                     ypos = max(czx_cleaned$rel_quant) + 10),
+              aes(as.factor(conc), ypos, label = p_print),
+              color = "grey50",
+              size = 3) +
+    ylim(0, max(czx_cleaned$rel_quant) + 20) +
+    xlab("Solvent concentration / %") +
+    ylab("6-hydroxychlorzoxazone conentration in % relative to control") +
+    facet_wrap(~str_wrap(solvent_pretty, width = 15, whitespace_only = FALSE), ncol = 2) +
+    theme_bw()
+
+ggsave("plots/czx.svg", width = 2.8, height = 6)
+```
+
+### Putative sulfate conjugate
+
+#### Clean data
+
+```{r}
+sulfate <- read_csv("files/quant/260220_2e1_solvent_inhibition_6-hydroxychlorzoxazone sulfate (putative)_CalibrationDataPoint.csv", show_col_types = FALSE) 
+
+sulfate <- mutate(sulfate, Quantity = `Area for Quantification`)
+
+head(sulfate)
+```
+
+```{r}
+sulfate_cleaned <- clean_data(sulfate) 
+```
+
+Visualize QC:
+
+```{r}
+viz_qc(sulfate_cleaned)
+```
+
+```{r}
+sulfate_cleaned <- extract_metadata(sulfate_cleaned)
+
+head(sulfate_cleaned)
+```
+
+#### Normalize to protein amount
+
+```{r}
+sulfate_cleaned <- normalize_to_prot(sulfate_cleaned, prot_content)
+  
+
+head(sulfate_cleaned)
+```
+
+
+#### Normalize to control
+
+```{r}
+sulfate_cleaned <- normalize_to_ctrl(sulfate_cleaned)
+
+head(sulfate_cleaned)
+```
+
+
+#### Summarize
+
+##### Plot
+
+```{r}
+ggplot(sulfate_cleaned, aes(as.factor(conc), rel_quant, colour = rel_quant)) +
+  ggbeeswarm::geom_beeswarm() +
+  ylim(0, NA) +
+  facet_wrap(~solvent) 
+
+```
+##### Table
+
+Calculate p values via one-sided, unpaired t-test.
+
+```{r}
+sulfate_cleaned_summarized <- calc_p_val(sulfate_cleaned)
+
+sulfate_cleaned_summarized
+```
+
+
+##### Plot with p value
+
+```{r}
+#| fig-width: 2.8
+#| fig-height: 6
+sulfate_cleaned %>%
+  filter(solvent_pretty != "Control") %>%
+  ggplot(aes(as.factor(conc), rel_quant)) +
+    ggbeeswarm::geom_beeswarm(alpha = 0.2, cex = 5, size = 2) +
+    stat_summary(fun = mean, geom = "crossbar", linewidth = 0.4, width = 0.4, color = "black") +
+    geom_text(data = mutate(sulfate_cleaned_summarized,
+                     ypos = max(sulfate_cleaned$rel_quant) + 10),
+              aes(as.factor(conc), ypos, label = p_print),
+              color = "grey50",
+              size = 3) +
+    ylim(0, max(sulfate_cleaned$rel_quant) + 20) +
+    xlab("Solvent concentration / %") +
+    ylab("Putative sulfate conjugate peak area in % relative to control") +
+    facet_wrap(~str_wrap(solvent_pretty, width = 15, whitespace_only = FALSE), ncol = 2) +
+    theme_bw()
+
+ggsave("plots/sulfate.svg", width = 2.8, height = 6)
+```
+
+### Putative glucuronic acid conjugate
+
+#### Clean data
+
+```{r}
+glucac <- read_csv("files/quant/260220_2e1_solvent_inhibition_6-hydroxychlorzoxazone glucuronic acid (putative)_CalibrationDataPoint.csv", show_col_types = FALSE) 
+
+glucac <- mutate(glucac, Quantity = `Area for Quantification`)
+
+head(glucac)
+```
+
+```{r}
+glucac_cleaned <- clean_data(glucac) 
+```
+
+Visualize QC:
+
+```{r}
+viz_qc(glucac_cleaned)
+```
+
+```{r}
+glucac_cleaned <- extract_metadata(glucac_cleaned)
+
+head(glucac_cleaned)
+```
+
+#### Normalize to protein amount
+
+```{r}
+glucac_cleaned <- normalize_to_prot(glucac_cleaned, prot_content)
+  
+
+head(glucac_cleaned)
+```
+
+
+#### Normalize to control
+
+```{r}
+glucac_cleaned <- normalize_to_ctrl(glucac_cleaned)
+
+head(glucac_cleaned)
+```
+
+
+#### Summarize
+
+##### Plot
+
+```{r}
+glucac_cleaned <- glucac_cleaned %>%
+  mutate(rel_quant = case_when(is.na(rel_quant) ~ 0,
+                              .default = rel_quant))
+
+ggplot(glucac_cleaned, aes(as.factor(conc), rel_quant, colour = rel_quant)) +
+  ggbeeswarm::geom_beeswarm() +
+  ylim(0, NA) +
+  facet_wrap(~solvent) 
+
+```
+##### Table
+
+Calculate p values via one-sided, unpaired t-test.
+
+```{r}
+glucac_cleaned_summarized <- calc_p_val(glucac_cleaned)
+
+glucac_cleaned_summarized
+```
+
+
+##### Plot with p value
+
+```{r}
+#| fig-width: 2.8
+#| fig-height: 6
+glucac_cleaned %>%
+  filter(solvent_pretty != "Control") %>%
+  ggplot(aes(as.factor(conc), rel_quant)) +
+    ggbeeswarm::geom_beeswarm(alpha = 0.2, cex = 5, size = 2) +
+    stat_summary(fun = mean, geom = "crossbar", linewidth = 0.4, width = 0.4, color = "black") +
+    geom_text(data = mutate(glucac_cleaned_summarized,
+                     ypos = max(glucac_cleaned$rel_quant) + 10),
+              aes(as.factor(conc), ypos, label = p_print),
+              color = "grey50",
+              size = 3) +
+    ylim(0, max(glucac_cleaned$rel_quant) + 20) +
+    xlab("Solvent concentration / %") +
+    ylab("Putative glucuronic acid conjugate peak area in % relative to control") +
+    facet_wrap(~str_wrap(solvent_pretty, width = 15, whitespace_only = FALSE), ncol = 2) +
+    theme_bw()
+
+ggsave("plots/glcac.svg", width = 2.8, height = 6)
+```
+
+## Session Info
+
+```{r}
+devtools::session_info()
+```

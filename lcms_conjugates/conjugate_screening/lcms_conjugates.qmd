@@ -1,0 +1,712 @@
+---
+title: "Conjugate Screening"
+author: "Yannik Schermer"
+format: 
+  html: 
+    toc: true
+bibliography: references.bib
+---
+
+## Introduction
+
+This document describes the data analysis pipeline to extract potential CYP2E1-dependent metabolites from the pre-processed feature tables and corresponding MGF files. It uses a combination of filtering, exact mass matching and post-acquisition neutral loss analysis. Characteristic neutral losses for conjugates are described in [@levsen2005] and [@brink2014]. The `metamorphr` package is primarily used for data analysis [@schermer].
+
+## Setup
+
+```{r setup}
+library(tidyverse)
+library(metamorphr)
+library(ggsankey)
+```
+
+## Preparational steps
+
+### Define Characteristic Neutral Losses
+
+Characteristic neutral losses are described in [@levsen2005] and [@brink2014]. This analysis primarily focuses on several conjugates (i.e., glutathione, sulfate and glucuronic acid).
+
+```{r define-nl}
+glutathione_pos <- c(75.0320,
+                     129.0426,
+                     232.0696,
+                     146.0692,
+                     249.0961,
+                     273.0961,
+                     275.1117,
+                     305.0682,
+                     307.0838)
+
+glutathione_neg <- c(306.0765,
+                     273.0961)
+
+
+sulfate_pos <- c(63.9619,
+                 79.9568)
+
+sulfate_neg <- c(63.9619,
+                 79.9568)
+
+
+gluc_acid_pos <- c(176.0321,
+                   194.0427)
+
+gluc_acid_neg <- c(176.0321)
+```
+
+
+### Read Data
+
+Feature tables and corresponding MGF files are read and analyzed using the `metamorphr` package.
+
+#### Read the Feature Tables
+
+```{r read-ft}
+csv_files <- list.files("input/csv/")
+cpd_names <- str_remove_all(csv_files, "^rp18\\_|\\.csv$|4\\-")
+
+csv_file_paths <- paste0("input/csv/", csv_files) 
+names(csv_file_paths) <- cpd_names
+
+csv_feature_tables <- csv_file_paths %>%
+  map(read_featuretable, label_col = 1, metadata_cols = 2:3) %>%
+  map(mutate, FEATURE_ID = UID)
+
+```
+
+#### Create a Metadata Table
+
+A metadata table is created for the feature tables and then joined to them.
+
+```{r create-metadata-table}
+metadata_table <- csv_feature_tables %>%
+  map(create_metadata_skeleton) %>%
+  bind_rows() %>%
+  distinct()
+
+metadata_table <- metadata_table %>%
+  mutate(Group = case_when(str_detect(Sample, "^QC_") ~ "QC",
+                           str_detect(Sample, "^B[0-9]{1,}") ~ str_remove_all(
+                             Sample, "^B[0-9]{1,}\\_|\\_[0-9]{1,}\\_[0-9]{1,}\\_[0-9]{1,}\\_[0-9]{1,}$"
+                            ))) %>%
+  mutate(Replicate = case_when(Group != "QC" ~ str_remove_all(
+    Sample, "^B[0-9]{1,}\\_[0-9A-Za-z]{1,}\\_.[0-9A-Za-z]{1,}\\_|\\_[0-9]{1,}\\_[0-9]{1,}\\_[0-9]{1,}$|^B[0-9]{1,}\\_[0-9A-Za-z]{1,}\\_"
+  ),
+  .default = "1")) %>%
+  mutate(Batch = case_when(Sample != "QC" ~ str_extract(Sample, "^B[0-9]{1,}"),
+                           .default = NA))
+```
+
+Join them together.
+
+```{r join-metadata}
+csv_feature_tables <- csv_feature_tables %>%
+  map(join_metadata, metadata_table)
+```
+
+#### Read MGF Files
+
+MGF files are read and then joined to the feature tables.
+
+```{r read-mgf}
+mgf_files <- list.files("input/mgf/")
+cpd_names_mgf <- str_remove_all(mgf_files, "^rp18\\_|\\.mgf$|4\\-")
+
+mgf_file_paths <- paste0("input/mgf/", mgf_files) 
+names(mgf_file_paths) <- cpd_names_mgf
+
+mgf_spectra <- mgf_file_paths %>%
+  map(read_mgf)
+```
+
+Verify correct order before joining operation.
+
+```{r compare-order}
+waldo::compare(names(mgf_spectra), names(csv_feature_tables))
+```
+
+Join them together.
+
+```{r join-mgf}
+csv_feature_tables <- map2(csv_feature_tables, mgf_spectra, left_join, by = "FEATURE_ID")
+```
+
+## Data Analysis
+
+### Data cleaning
+
+Some initial steps are performed prior to metabolite and conjugate screening:
+
+1.  Remove QC samples as they are not needed for downstream analysis
+
+2.  "Subtract" blank samples by filtering out features were the maximum intensity in samples is less than 3x as high as the maximum intensity in blank samples
+
+3.  Remove blank samples as they are not needed for downstream analysis
+
+4.  Remove "noise" (i.e., features that were not detected in at least 3 out of 4 samples of at least one group
+
+The number of features after each step are saved to create a summary plot.
+
+```{r data-clean-def-old}
+clean_pipe <- function(data) {
+  data %>%
+    filter(Group != "QC") %>%
+    filter_blank(blank_samples = "PBS", min_frac = 3, blank_as_group = T, group_column = Group) %>%
+    filter(Group != "PBS") %>%
+    filter_grouped_mv(min_found = 0.75, fraction = T, group_column = Group)
+}
+```
+
+```{r data-clean-def}
+clean_pipe <- function(data) {
+  n_features <- tibble(
+    Step = c("all features", 
+             "after blank subtraction", 
+             "after removing irreproducible features"),
+    n = c(length(unique(data$UID)),
+          NA,
+          NA)
+  )
+  
+  data <- data %>%
+    filter(Group != "QC") %>%
+    filter_blank(blank_samples = "PBS", min_frac = 3, blank_as_group = T, group_column = Group)
+  
+  n_features[2, 2] <- length(unique(data$UID))
+  
+  data <- data %>%
+    filter(Group != "PBS") %>%
+    filter_grouped_mv(min_found = 0.75, fraction = T, group_column = Group)
+  
+  n_features[3, 2] <- length(unique(data$UID))
+  
+  list(
+    data = data,
+    n_features = n_features
+  )
+}
+```
+
+```{r data-clean}
+csv_feature_tables_cleaned <- csv_feature_tables %>%
+  map(clean_pipe)
+```
+
+The feature tables and the tables containing the numbers of features are extracted.
+
+```{r extract-tables-numbers}
+extract_numbers <- function(data) {
+  data[["n_features"]]
+}
+
+extract_ft <- function(data) {
+  data[["data"]]
+}
+
+n_features <- map(csv_feature_tables_cleaned, extract_numbers)
+
+csv_feature_tables_cleaned <- map(csv_feature_tables_cleaned, extract_ft)
+```
+
+### Screen for Potential Conjugates
+
+#### Calculate Neutral Losses 
+
+First, neutral losses are calculated for each feature.
+
+```{r calc-nl}
+csv_feature_tables_cleaned <- csv_feature_tables_cleaned %>%
+  map(calc_neutral_loss, m_z_col = `m/z`)
+```
+
+#### Split Feature Table List
+
+The feature tables list is split into positive and negative.
+
+```{r split-pos-neg}
+csv_feature_tables_cleaned_pos <- csv_feature_tables_cleaned[str_detect(names(csv_feature_tables_cleaned), "^pos")]
+csv_feature_tables_cleaned_neg <- csv_feature_tables_cleaned[str_detect(names(csv_feature_tables_cleaned), "^neg")]
+```
+
+#### Screen
+
+The screening is done for all conjugates, positive and negative ionization mode. At least 40 % of the characteristic neutral losses, rounded up to the next integer must be found for a feature to be considered a possible conjugate. A tolerance of 10 ppm is used, 5 ppm for the precursor mass and 5 ppm for the fragment mass. 
+
+The number of features after this step are counted again:
+
+```{r}
+count_features <- function(data, curr_step) {
+  tibble(
+    Step = curr_step,
+    n = length(unique(data$UID))
+  )
+}
+```
+
+
+##### Glutathione
+
+```{r screen-gsh}
+pot_conj_gsh_pos <- csv_feature_tables_cleaned_pos %>%
+  map(filter_neutral_loss, 
+      losses = glutathione_pos, 
+      min_found = ceiling(length(glutathione_pos) * 0.4), 
+      tolerance = 10,
+      tolerance_type = "ppm")
+
+pot_conj_gsh_neg <- csv_feature_tables_cleaned_neg %>%
+  map(filter_neutral_loss, 
+      losses = glutathione_neg, 
+      min_found = ceiling(length(glutathione_neg) * 0.4), 
+      tolerance = 10,
+      tolerance_type = "ppm")
+
+n_ft_pot_conj_gsh <- c(pot_conj_gsh_neg,
+                       pot_conj_gsh_pos) %>%
+  map(count_features, "after neutral loss screening")
+```
+
+##### Sulfate
+
+```{r screen-sulfate}
+pot_conj_sulfate_pos <- csv_feature_tables_cleaned_pos %>%
+  map(filter_neutral_loss, 
+      losses = sulfate_pos, 
+      min_found = ceiling(length(sulfate_pos) * 0.4), 
+      tolerance = 10,
+      tolerance_type = "ppm")
+
+pot_conj_sulfate_neg <- csv_feature_tables_cleaned_neg %>%
+  map(filter_neutral_loss, 
+      losses = sulfate_neg, 
+      min_found = ceiling(length(sulfate_neg) * 0.4), 
+      tolerance = 10,
+      tolerance_type = "ppm")
+
+n_ft_pot_conj_sulfate <- c(pot_conj_sulfate_neg,
+                           pot_conj_sulfate_pos) %>%
+  map(count_features, "after neutral loss screening")
+```
+
+##### Glucuronic acid
+
+```{r screen-glucacid}
+pot_conj_glucacid_pos <- csv_feature_tables_cleaned_pos %>%
+  map(filter_neutral_loss, 
+      losses = gluc_acid_pos, 
+      min_found = ceiling(length(gluc_acid_pos) * 0.4), 
+      tolerance = 10,
+      tolerance_type = "ppm")
+
+pot_conj_glucacid_neg <- csv_feature_tables_cleaned_neg %>%
+  map(filter_neutral_loss, 
+      losses = gluc_acid_neg, 
+      min_found = ceiling(length(gluc_acid_neg) * 0.4), 
+      tolerance = 10,
+      tolerance_type = "ppm")
+
+n_ft_pot_conj_glucacid <- c(pot_conj_glucacid_neg,
+                            pot_conj_glucacid_pos) %>%
+  map(count_features, "after neutral loss screening")
+```
+
+##### Calculate Number of Retained Features
+
+```{r retained-after-screen-list}
+n_ft_after_screen <- list(
+  n_ft_pot_conj_glucacid,
+  n_ft_pot_conj_gsh,
+  n_ft_pot_conj_sulfate
+) %>%
+  transpose() %>%
+  map(bind_rows) %>%
+  map(group_by, Step) %>%
+  map(summarise, n = sum(n))
+
+```
+
+#### Remove Features that are also Found in Controls
+
+First, a new group column is created. All controls are allocated to the same group and Hep-G2-2E1 cells treated with compound are allocated to another group.
+
+```{r def-alloc-groups}
+allocate_groups <- function(data) {
+  data %>%
+    mutate(Group2 = case_when(str_detect(Group, "^[A-Za-z]{1,}_2e1") ~ "cpd",
+                              .default = "ctrl")) %>%
+    mutate(Group2 = case_when(str_detect(Group, "^med_2e1") ~ "ctrl",
+                              .default = Group2))
+}
+```
+
+##### Glutathione
+
+```{r filter-gsh}
+filtered_pot_conj_gsh_neg <- pot_conj_gsh_neg %>%
+  map(allocate_groups) %>%
+  map(filter_blank, 
+      blank_samples = "ctrl", 
+      min_frac = 3, 
+      blank_as_group = TRUE, 
+      group_column = Group2)
+
+filtered_pot_conj_gsh_pos <- pot_conj_gsh_pos %>%
+  map(allocate_groups) %>%
+  map(filter_blank, 
+      blank_samples = "ctrl", 
+      min_frac = 3, 
+      blank_as_group = TRUE, 
+      group_column = Group2)
+
+n_ft_filtered_pot_conj_gsh <- c(filtered_pot_conj_gsh_neg,
+                                filtered_pot_conj_gsh_pos) %>%
+  map(count_features, "after removing features found in HepG2-wt")
+```
+
+
+##### Sulfate
+
+```{r filter-sulfate}
+filtered_pot_conj_sulfate_neg <- pot_conj_sulfate_neg %>%
+  map(allocate_groups) %>%
+  map(filter_blank, 
+      blank_samples = "ctrl", 
+      min_frac = 3, 
+      blank_as_group = TRUE, 
+      group_column = Group2)
+
+filtered_pot_conj_sulfate_pos <- pot_conj_sulfate_pos %>%
+  map(allocate_groups) %>%
+  map(filter_blank, 
+      blank_samples = "ctrl", 
+      min_frac = 3, 
+      blank_as_group = TRUE, 
+      group_column = Group2)
+
+n_ft_filtered_pot_conj_sulfate <- c(filtered_pot_conj_sulfate_neg,
+                                    filtered_pot_conj_sulfate_pos) %>%
+  map(count_features, "after removing features found in HepG2-wt")
+```
+
+##### Glucuronic acid
+
+```{r filter-glucac}
+filtered_pot_conj_glucacid_neg <- pot_conj_glucacid_neg %>%
+  map(allocate_groups) %>%
+  map(filter_blank, 
+      blank_samples = "ctrl", 
+      min_frac = 3, 
+      blank_as_group = TRUE, 
+      group_column = Group2)
+
+filtered_pot_conj_glucacid_pos <- pot_conj_glucacid_pos %>%
+  map(allocate_groups) %>%
+  map(filter_blank, 
+      blank_samples = "ctrl", 
+      min_frac = 3, 
+      blank_as_group = TRUE, 
+      group_column = Group2)
+
+n_ft_filtered_pot_conj_glucacid <- c(filtered_pot_conj_glucacid_neg,
+                                     filtered_pot_conj_glucacid_pos) %>%
+  map(count_features, "after removing features found in HepG2-wt")
+```
+
+##### Calculate Number of Retained Features
+
+###### Total
+
+```{r retained-after-screen}
+n_ft_after_filter <- list(
+  n_ft_filtered_pot_conj_glucacid,
+  n_ft_filtered_pot_conj_gsh,
+  n_ft_filtered_pot_conj_sulfate
+) %>%
+  transpose() %>%
+  map(bind_rows) %>%
+  map(group_by, Step) %>%
+  map(summarise, n = sum(n))
+
+```
+
+###### By Conjugate
+
+```{r retained-after-screen-by-conj}
+
+n_ft_after_filter_mut <- list(
+  map(n_ft_filtered_pot_conj_glucacid, mutate, Step = "Glucuronic acid"),
+  map(n_ft_filtered_pot_conj_gsh, mutate, Step = "Glutathione"),
+  map(n_ft_filtered_pot_conj_sulfate, mutate, Step = "Sulfate")
+) %>%
+  transpose() %>%
+  map(bind_rows) %>%
+  map(group_by, Step) %>%
+  map(summarise, n = sum(n))
+
+```
+
+#### Visualize Number of Features
+
+```{r vis-sankey}
+n_features_viz <- n_features %>%
+  map2(n_ft_after_screen, rbind) %>%
+  map2(n_ft_after_filter, rbind)
+
+
+make_sankey <- function(data) {
+  n_rows <- data$n[1]
+  n_cols <- nrow(data)
+   
+  return_df <- matrix(nrow = n_rows,
+                      ncol = n_cols)
+   
+  for (i in 1:n_cols) {
+    return_df[1:(n_rows - (n_rows - data$n[i])), i] <- c(rep(data$Step[i], n_rows - (n_rows - data$n[i])))
+     
+    if (i == n_cols) {
+      break
+    }
+     
+    return_df[1:(n_rows - (n_rows - data$n[i])), (i + 1)] <- paste0("zzzremoved", (n_cols + 1) - i)
+  }
+  as_tibble(return_df)
+}
+
+
+combine_counts_conj <- function(count_df, conjugate_df) {
+  ncols_cdf <- ncol(count_df)
+  nrows_cdf <- nrow(count_df)
+  
+  new_col_name <- paste0("V", ncols_cdf + 1)
+  
+  return_tbl <- tibble(
+    new_col = c(rep(conjugate_df$Step, conjugate_df$n),
+                rep(NA, nrows_cdf - sum(conjugate_df$n)))
+  )
+  
+  colnames(return_tbl) <- new_col_name
+  
+  cbind(count_df, return_tbl)
+}
+
+
+sample_sankey_pos_nphl <- n_features_viz[["pos_nitrophenol"]] %>%
+  make_sankey() %>% 
+  combine_counts_conj(n_ft_after_filter_mut[["pos_nitrophenol"]]) %>% 
+  make_long(V1, V2, V3, V4, V5, V6) %>%
+  filter(!is.na(node)) %>%
+  filter(!(is.na(x) & is.na(next_x) & is.na(next_node))) %>%
+  mutate(keep_ft = case_when(stringr::str_detect(node, "zzzremoved") ~ "removed",
+                          .default = "zkept")) %>%
+  ggplot(aes(x = x, 
+             next_x = next_x, 
+             node = node, 
+             next_node = next_node,
+             fill = keep_ft)) +
+    geom_sankey(flow.alpha = .6,
+                width = 0.2) +
+    theme_void() +
+    labs(title = "4-nitrophenol, positive") +
+    theme(legend.position = "none")
+
+
+sample_sankey_neg_nphl <- n_features_viz[["neg_nitrophenol"]] %>%
+  make_sankey() %>% 
+  combine_counts_conj(n_ft_after_filter_mut[["neg_nitrophenol"]]) %>% 
+  make_long(V1, V2, V3, V4, V5, V6) %>%
+  filter(!is.na(node)) %>%
+  filter(!(is.na(x) & is.na(next_x) & is.na(next_node))) %>%
+  mutate(keep_ft = case_when(stringr::str_detect(node, "zzzremoved") ~ "removed",
+                          .default = "zkept")) %>%
+  ggplot(aes(x = x, 
+             next_x = next_x, 
+             node = node, 
+             next_node = next_node,
+             fill = keep_ft)) +
+    geom_sankey(flow.alpha = .6,
+                width = 0.2) +
+    theme_void() +
+    labs(title = "4-nitrophenol, negative") +
+    theme(legend.position = "none")
+
+sample_sankey_pos_nphl
+sample_sankey_neg_nphl
+```
+
+```{r save-sankey}
+ggsave("plots/sankey_pnp_pos.svg", 
+       plot = sample_sankey_pos_nphl,
+       width = 10,
+       height = 7)
+
+ggsave("plots/sankey_pnp_neg.svg", 
+       plot = sample_sankey_neg_nphl,
+       width = 10,
+       height = 7)
+
+
+ggsave("plots/sankey_pnp_pos_wide.svg", 
+       plot = sample_sankey_pos_nphl,
+       width = 16,
+       height = 3)
+
+ggsave("plots/sankey_pnp_neg_wide.svg", 
+       plot = sample_sankey_neg_nphl,
+       width = 16,
+       height = 3)
+
+ggsave("plots/sankey_pnp_pos_publ.svg", 
+       plot = sample_sankey_pos_nphl,
+       width = 16,
+       height = 5)
+
+ggsave("plots/sankey_pnp_neg_publ.svg", 
+       plot = sample_sankey_neg_nphl,
+       width = 16,
+       height = 5)
+```
+
+The last nodes are very small. Make plots of the relevant area:
+
+```{r vis-sankey-relevant}
+sample_sankey_pos_nphl_rlv <- n_features_viz[["pos_nitrophenol"]] %>%
+  filter(Step %in% c("after neutral loss screening",
+                     "after removing features found in HepG2-wt")) %>%
+  make_sankey() %>% 
+  combine_counts_conj(n_ft_after_filter_mut[["pos_nitrophenol"]]) %>% 
+  make_long(V1, V2, V3) %>%
+  filter(!is.na(node)) %>%
+  filter(!(is.na(x) & is.na(next_x) & is.na(next_node))) %>%
+  mutate(keep_ft = case_when(stringr::str_detect(node, "zzzremoved") ~ "removed",
+                          .default = "zkept")) %>%
+  ggplot(aes(x = x, 
+             next_x = next_x, 
+             node = node, 
+             next_node = next_node,
+             fill = keep_ft)) +
+    geom_sankey(flow.alpha = .6,
+                width = 0.2) +
+    theme_void() +
+    labs(title = "4-nitrophenol, positive") +
+    theme(legend.position = "none")
+
+
+sample_sankey_neg_nphl_rlv <- n_features_viz[["neg_nitrophenol"]] %>%
+  filter(Step %in% c("after neutral loss screening",
+                     "after removing features found in HepG2-wt")) %>%
+  make_sankey() %>% 
+  combine_counts_conj(n_ft_after_filter_mut[["neg_nitrophenol"]]) %>% 
+  make_long(V1, V2, V3) %>%
+  filter(!is.na(node)) %>%
+  filter(!(is.na(x) & is.na(next_x) & is.na(next_node))) %>%
+  mutate(keep_ft = case_when(stringr::str_detect(node, "zzzremoved") ~ "removed",
+                          .default = "zkept")) %>%
+  ggplot(aes(x = x, 
+             next_x = next_x, 
+             node = node, 
+             next_node = next_node,
+             fill = keep_ft)) +
+    geom_sankey(flow.alpha = .6,
+                width = 0.2) +
+    theme_void() +
+    labs(title = "4-nitrophenol, negative") +
+    theme(legend.position = "none")
+
+
+sample_sankey_neg_nphl_rlv
+sample_sankey_pos_nphl_rlv
+```
+
+```{r save-sankey-relevant}
+ggsave("plots/sankey_pnp_pos_rlv.svg", 
+       plot = sample_sankey_pos_nphl_rlv,
+       width = 10,
+       height = 7)
+
+ggsave("plots/sankey_pnp_neg_rlv.svg", 
+       plot = sample_sankey_neg_nphl_rlv,
+       width = 10,
+       height = 7)
+
+ggsave("plots/sankey_pnp_pos_rlv_wide.svg", 
+       plot = sample_sankey_pos_nphl_rlv,
+       width = 5,
+       height = 1)
+
+ggsave("plots/sankey_pnp_neg_rlv_wide.svg", 
+       plot = sample_sankey_neg_nphl_rlv,
+       width = 5,
+       height = 1)
+
+ggsave("plots/sankey_pnp_pos_rlv_publ.svg", 
+       plot = sample_sankey_pos_nphl_rlv,
+       width = 5,
+       height = 2)
+
+ggsave("plots/sankey_pnp_neg_rlv_publ.svg", 
+       plot = sample_sankey_neg_nphl_rlv,
+       width = 5,
+       height = 2)
+```
+
+
+### Export Potential Conjugates
+
+```{r}
+#| output: false
+
+write_conjugates <- function(df, ft_name, conjugate, write_path) {
+  df <- df %>% 
+    select(Feature, Sample, RT, `m/z`, Intensity) %>%
+    spread(key = "Sample", value = "Intensity") 
+  
+  file_name <- paste0(write_path, "/", ft_name, "_", conjugate, ".csv")
+  
+  write_csv(df, file_name)
+}
+
+map2(filtered_pot_conj_glucacid_neg, 
+     names(filtered_pot_conj_glucacid_neg),
+     write_conjugates,
+     "glcac",
+     "conjugates")
+
+map2(filtered_pot_conj_glucacid_pos, 
+     names(filtered_pot_conj_glucacid_pos),
+     write_conjugates,
+     "glcac",
+     "conjugates")
+
+
+map2(filtered_pot_conj_gsh_neg, 
+     names(filtered_pot_conj_gsh_neg),
+     write_conjugates,
+     "gsh",
+     "conjugates")
+
+map2(filtered_pot_conj_gsh_pos, 
+     names(filtered_pot_conj_gsh_pos),
+     write_conjugates,
+     "gsh",
+     "conjugates")
+
+
+map2(filtered_pot_conj_sulfate_neg, 
+     names(filtered_pot_conj_sulfate_neg),
+     write_conjugates,
+     "sulfate",
+     "conjugates")
+
+map2(filtered_pot_conj_sulfate_pos, 
+     names(filtered_pot_conj_sulfate_pos),
+     write_conjugates,
+     "sulfate",
+     "conjugates")
+```
+
+## Session Info
+
+```{r}
+devtools::session_info()
+```
+
+## References
