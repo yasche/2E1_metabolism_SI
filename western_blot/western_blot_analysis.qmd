@@ -62,7 +62,7 @@ intensities <- wb_intensities[[2]] |>
   mutate(Line = case_when(Line == "WT" ~ "wt",
                           Line == "CYP2E1"  ~ "2E1",
                           .default = Line)) |>
-  mutate(Line = paste0("Hep-G2-", Line)) |>
+  mutate(Line = paste0("HepG2-", Line)) |>
   mutate(`Cell line` = Line)
 ```
 
