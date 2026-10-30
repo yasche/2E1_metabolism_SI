@@ -15,6 +15,7 @@ To asses the impact of organic solvents on the activity of drug-metabolizing enz
 
 ```{r}
 library(tidyverse)
+library(DescTools)
 ```
 
 ## Calculate inhibition
@@ -181,7 +182,7 @@ czx_cleaned %>%
     facet_wrap(~str_wrap(solvent_pretty, width = 15, whitespace_only = FALSE), ncol = 2) +
     theme_bw()
 ```
-##### Table
+##### Table t-test
 
 Calculate p values via one-sided, unpaired t-test.
 
@@ -251,7 +252,50 @@ czx_cleaned_summarized <- calc_p_val(czx_cleaned)
 czx_cleaned_summarized
 ```
 
-##### Plot with p value
+##### Table Dunnett's test
+
+```{r}
+calc_p_val_dunn <- function(data) {
+  data_cleaned_sample <- data %>%
+    filter(solvent != "ctrl") %>%
+    group_by(solvent, conc) %>%
+    nest() %>%
+    mutate(cvec = map(data, pull, rel_quant))
+  
+  data_cleaned_sample_list <- data_cleaned_sample$cvec
+  
+  names(data_cleaned_sample_list) <- paste0(data_cleaned_sample$solvent,
+                                                "_",
+                                                data_cleaned_sample$conc)
+  
+  data_cleaned_ctrl_list <- list(
+    ctrl = czx_cleaned %>%
+    filter(solvent == "ctrl") %>%
+      pull(rel_quant)
+  )
+  
+  data_cleaned_list <- c(data_cleaned_ctrl_list,
+    data_cleaned_sample_list)
+  
+  DescTools::DunnettTest(data_cleaned_list)[["1"]] %>% 
+    as_tibble() %>%
+    mutate(names = names(data_cleaned_list)[-1]) %>%
+    separate(names, c("solvent", "conc"), "_") %>%
+    transmute(solvent = solvent,
+           conc = as.numeric(conc),
+           p_val_dunn = pval) %>%
+    mutate(significant_dunn = case_when(p_val_dunn < 0.05 ~ "*",
+                                   .default = ""))%>%
+    mutate(p_print_dunn = as.character(format(round(p_val_dunn, 3), nsmall = 3))) %>%
+    mutate(p_print_dunn = case_when(p_print_dunn == "0.000" ~ "< 0.001",
+                               .default = p_print_dunn)) 
+}
+
+czx_cleaned_summarized <- calc_p_val_dunn(czx_cleaned) %>%
+  right_join(czx_cleaned_summarized, by = c("solvent", "conc"))
+```
+
+##### Plot with t-test p value
 
 ```{r}
 #| fig-width: 2.8
@@ -273,6 +317,30 @@ czx_cleaned %>%
     theme_bw()
 
 ggsave("plots/czx.svg", width = 2.8, height = 6)
+```
+
+##### Plot with Dunnett's p value
+
+```{r}
+#| fig-width: 2.8
+#| fig-height: 6
+czx_cleaned %>%
+  filter(solvent_pretty != "Control") %>%
+  ggplot(aes(as.factor(conc), rel_quant)) +
+    ggbeeswarm::geom_beeswarm(alpha = 0.2, cex = 5, size = 2) +
+    stat_summary(fun = mean, geom = "crossbar", linewidth = 0.4, width = 0.4, color = "black") +
+    geom_text(data = mutate(czx_cleaned_summarized,
+                     ypos = max(czx_cleaned$rel_quant) + 10),
+              aes(as.factor(conc), ypos, label = p_print_dunn),
+              color = "grey50",
+              size = 3) +
+    ylim(0, max(czx_cleaned$rel_quant) + 20) +
+    xlab("Solvent concentration / %") +
+    ylab("6-hydroxychlorzoxazone conentration in % relative to control") +
+    facet_wrap(~str_wrap(solvent_pretty, width = 15, whitespace_only = FALSE), ncol = 2) +
+    theme_bw()
+
+ggsave("plots/czx_dunn.svg", width = 2.8, height = 6)
 ```
 
 ### Putative sulfate conjugate
@@ -333,7 +401,7 @@ ggplot(sulfate_cleaned, aes(as.factor(conc), rel_quant, colour = rel_quant)) +
   facet_wrap(~solvent) 
 
 ```
-##### Table
+##### Table t-test
 
 Calculate p values via one-sided, unpaired t-test.
 
@@ -343,8 +411,14 @@ sulfate_cleaned_summarized <- calc_p_val(sulfate_cleaned)
 sulfate_cleaned_summarized
 ```
 
+##### Table Dunnett's test
 
-##### Plot with p value
+```{r}
+sulfate_cleaned_summarized <- calc_p_val_dunn(sulfate_cleaned) %>%
+  right_join(sulfate_cleaned_summarized, by = c("solvent", "conc"))
+```
+
+##### Plot with t-test p value
 
 ```{r}
 #| fig-width: 2.8
@@ -366,6 +440,30 @@ sulfate_cleaned %>%
     theme_bw()
 
 ggsave("plots/sulfate.svg", width = 2.8, height = 6)
+```
+
+##### Plot with Dunnett's p value
+
+```{r}
+#| fig-width: 2.8
+#| fig-height: 6
+sulfate_cleaned %>%
+  filter(solvent_pretty != "Control") %>%
+  ggplot(aes(as.factor(conc), rel_quant)) +
+    ggbeeswarm::geom_beeswarm(alpha = 0.2, cex = 5, size = 2) +
+    stat_summary(fun = mean, geom = "crossbar", linewidth = 0.4, width = 0.4, color = "black") +
+    geom_text(data = mutate(sulfate_cleaned_summarized,
+                     ypos = max(sulfate_cleaned$rel_quant) + 10),
+              aes(as.factor(conc), ypos, label = p_print_dunn),
+              color = "grey50",
+              size = 3) +
+    ylim(0, max(sulfate_cleaned$rel_quant) + 20) +
+    xlab("Solvent concentration / %") +
+    ylab("Putative sulfate conjugate peak area in % relative to control") +
+    facet_wrap(~str_wrap(solvent_pretty, width = 15, whitespace_only = FALSE), ncol = 2) +
+    theme_bw()
+
+ggsave("plots/sulfate_dunn.svg", width = 2.8, height = 6)
 ```
 
 ### Putative glucuronic acid conjugate
@@ -430,7 +528,7 @@ ggplot(glucac_cleaned, aes(as.factor(conc), rel_quant, colour = rel_quant)) +
   facet_wrap(~solvent) 
 
 ```
-##### Table
+##### Table t-test
 
 Calculate p values via one-sided, unpaired t-test.
 
@@ -440,8 +538,14 @@ glucac_cleaned_summarized <- calc_p_val(glucac_cleaned)
 glucac_cleaned_summarized
 ```
 
+##### Table Dunnett's test
 
-##### Plot with p value
+```{r}
+glucac_cleaned_summarized <- calc_p_val_dunn(glucac_cleaned) %>%
+  right_join(glucac_cleaned_summarized, by = c("solvent", "conc"))
+```
+
+##### Plot with t-test p value
 
 ```{r}
 #| fig-width: 2.8
@@ -463,6 +567,30 @@ glucac_cleaned %>%
     theme_bw()
 
 ggsave("plots/glcac.svg", width = 2.8, height = 6)
+```
+
+##### Plot with t-test p value
+
+```{r}
+#| fig-width: 2.8
+#| fig-height: 6
+glucac_cleaned %>%
+  filter(solvent_pretty != "Control") %>%
+  ggplot(aes(as.factor(conc), rel_quant)) +
+    ggbeeswarm::geom_beeswarm(alpha = 0.2, cex = 5, size = 2) +
+    stat_summary(fun = mean, geom = "crossbar", linewidth = 0.4, width = 0.4, color = "black") +
+    geom_text(data = mutate(glucac_cleaned_summarized,
+                     ypos = max(glucac_cleaned$rel_quant) + 10),
+              aes(as.factor(conc), ypos, label = p_print_dunn),
+              color = "grey50",
+              size = 3) +
+    ylim(0, max(glucac_cleaned$rel_quant) + 20) +
+    xlab("Solvent concentration / %") +
+    ylab("Putative glucuronic acid conjugate peak area in % relative to control") +
+    facet_wrap(~str_wrap(solvent_pretty, width = 15, whitespace_only = FALSE), ncol = 2) +
+    theme_bw()
+
+ggsave("plots/glcac_dunn.svg", width = 2.8, height = 6)
 ```
 
 ## Session Info
