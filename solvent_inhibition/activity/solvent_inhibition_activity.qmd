@@ -569,7 +569,7 @@ glucac_cleaned %>%
 ggsave("plots/glcac.svg", width = 2.8, height = 6)
 ```
 
-##### Plot with t-test p value
+##### Plot with Dunnett's p value
 
 ```{r}
 #| fig-width: 2.8
