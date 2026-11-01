@@ -258,7 +258,7 @@ czx_cleaned_summarized
 ###### Check normality of residues
 
 ```{r}
-resids_czx <- residuals(lm(rel_quant ~ group, data = czx_cleaned %>% mutate(group = paste0(solvent, conc))))
+resids_czx <- residuals(lm(rel_quant ~ group, data = czx_cleaned %>% mutate(group = paste0(solvent, conc)) %>% mutate(group = case_when(str_detect(group, "ctrl") ~ "ctrl", .default = group))))
 
 shapiro.test(resids_czx)
 ```
@@ -271,7 +271,9 @@ Residuals are normally distributed.
 leveneTest(czx_cleaned %>% 
              pull(rel_quant), 
            czx_cleaned %>% 
-             mutate(group = as.factor(paste0(solvent, conc))) %>% 
+             mutate(group = paste0(solvent, conc)) %>% 
+             mutate(group = case_when(str_detect(group, "ctrl") ~ "ctrl", .default = group)) %>%
+             mutate(group = as.factor(group)) %>%
              pull(group))
 ```
 
@@ -283,7 +285,8 @@ Prerequisites for ANOVA are satisfied.
 
 ```{r}
 aov(rel_quant ~ group, data = czx_cleaned %>% 
-      mutate(group = paste0(solvent, conc))) %>%
+      mutate(group = paste0(solvent, conc)) %>%
+      mutate(group = case_when(str_detect(group, "ctrl") ~ "ctrl", .default = group))) %>%
   summary()
 ```
 Groups vary significantly. Proceed with Dunnett's test for post hoc testing.
@@ -452,7 +455,7 @@ sulfate_cleaned_summarized
 ###### Check normality of residues
 
 ```{r}
-resids_sulfate <- residuals(lm(rel_quant ~ group, data = sulfate_cleaned %>% mutate(group = paste0(solvent, conc))))
+resids_sulfate <- residuals(lm(rel_quant ~ group, data = sulfate_cleaned %>% mutate(group = paste0(solvent, conc)) %>% mutate(group = case_when(str_detect(group, "ctrl") ~ "ctrl", .default = group))))
 
 shapiro.test(resids_sulfate)
 ```
@@ -466,7 +469,8 @@ Prerequisites for ANOVA are not satisfied. Proceed with Kruskal-Wallis test.
 
 ```{r}
 kruskal.test(rel_quant ~ group, data = sulfate_cleaned %>% 
-      mutate(group = paste0(solvent, conc))) 
+      mutate(group = paste0(solvent, conc)) %>%
+      mutate(group = case_when(str_detect(group, "ctrl") ~ "ctrl", .default = group))) 
 ```
 Groups vary significantly. Proceed with Dunnett's test for post hoc testing.
 
@@ -602,7 +606,7 @@ glucac_cleaned_summarized
 ###### Check normality of residues
 
 ```{r}
-resids_glucac <- residuals(lm(rel_quant ~ group, data = glucac_cleaned %>% mutate(group = paste0(solvent, conc))))
+resids_glucac <- residuals(lm(rel_quant ~ group, data = glucac_cleaned %>% mutate(group = paste0(solvent, conc)) %>% mutate(group = case_when(str_detect(group, "ctrl") ~ "ctrl", .default = group))))
 
 shapiro.test(resids_glucac)
 ```
@@ -614,7 +618,8 @@ Prerequisites for ANOVA are not satisfied. Proceed with Kruskal-Wallis test.
 
 ```{r}
 kruskal.test(rel_quant ~ group, data = glucac_cleaned %>% 
-      mutate(group = paste0(solvent, conc))) 
+      mutate(group = paste0(solvent, conc)) %>%
+      mutate(group = case_when(str_detect(group, "ctrl") ~ "ctrl", .default = group))) 
 ```
 Groups vary significantly. Proceed with Dunnett's test for post hoc testing.
 

@@ -151,7 +151,7 @@
 <line x1='51.89' y1='366.99' x2='65.77' y2='366.99' style='stroke-width: 2.13; stroke-linecap: butt; stroke-linejoin: miter;' />
 <line x1='86.58' y1='363.29' x2='100.45' y2='363.29' style='stroke-width: 2.13; stroke-linecap: butt; stroke-linejoin: miter;' />
 <text x='58.83' y='342.46' text-anchor='middle' style='font-size: 8.54px;fill: #7F7F7F; font-family: "Arial";' textLength='21.38px' lengthAdjust='spacingAndGlyphs'>0.046</text>
-<text x='93.52' y='342.46' text-anchor='middle' style='font-size: 8.54px;fill: #7F7F7F; font-family: "Arial";' textLength='21.38px' lengthAdjust='spacingAndGlyphs'>0.512</text>
+<text x='93.52' y='342.46' text-anchor='middle' style='font-size: 8.54px;fill: #7F7F7F; font-family: "Arial";' textLength='21.38px' lengthAdjust='spacingAndGlyphs'>0.513</text>
 <rect x='38.02' y='332.28' width='76.31' height='68.22' style='stroke-width: 1.07; stroke: #333333;' />
 </g>
 <g clip-path='url(#cpMC4wMHwyMDEuNjB8MC4wMHw0MzIuMDA=)'>
@@ -182,7 +182,7 @@
 <circle cx='175.31' cy='66.55' r='2.49' style='stroke-width: 0.71; stroke: #000000; stroke-opacity: 0.20; fill: #000000; fill-opacity: 0.20;' />
 <line x1='133.68' y1='63.20' x2='147.56' y2='63.20' style='stroke-width: 2.13; stroke-linecap: butt; stroke-linejoin: miter;' />
 <line x1='168.37' y1='66.77' x2='182.25' y2='66.77' style='stroke-width: 2.13; stroke-linecap: butt; stroke-linejoin: miter;' />
-<text x='140.62' y='42.09' text-anchor='middle' style='font-size: 8.54px;fill: #7F7F7F; font-family: "Arial";' textLength='21.38px' lengthAdjust='spacingAndGlyphs'>0.449</text>
+<text x='140.62' y='42.09' text-anchor='middle' style='font-size: 8.54px;fill: #7F7F7F; font-family: "Arial";' textLength='21.38px' lengthAdjust='spacingAndGlyphs'>0.448</text>
 <text x='175.31' y='42.09' text-anchor='middle' style='font-size: 8.54px;fill: #7F7F7F; font-family: "Arial";' textLength='21.38px' lengthAdjust='spacingAndGlyphs'>0.040</text>
 <rect x='119.81' y='31.90' width='76.31' height='68.22' style='stroke-width: 1.07; stroke: #333333;' />
 </g>
