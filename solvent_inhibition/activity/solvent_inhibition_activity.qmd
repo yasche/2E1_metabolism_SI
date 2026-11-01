@@ -16,6 +16,7 @@ To asses the impact of organic solvents on the activity of drug-metabolizing enz
 ```{r}
 library(tidyverse)
 library(DescTools)
+library(car)
 ```
 
 ## Calculate inhibition
@@ -252,7 +253,42 @@ czx_cleaned_summarized <- calc_p_val(czx_cleaned)
 czx_cleaned_summarized
 ```
 
-##### Table Dunnett's test
+##### Dunnett's test
+
+###### Check normality of residues
+
+```{r}
+resids_czx <- residuals(lm(rel_quant ~ group, data = czx_cleaned %>% mutate(group = paste0(solvent, conc))))
+
+shapiro.test(resids_czx)
+```
+
+Residuals are normally distributed.
+
+###### Check homogeneity of variances
+
+```{r}
+leveneTest(czx_cleaned %>% 
+             pull(rel_quant), 
+           czx_cleaned %>% 
+             mutate(group = as.factor(paste0(solvent, conc))) %>% 
+             pull(group))
+```
+
+Variances are homogeneous.
+
+Prerequisites for ANOVA are satisfied.
+
+###### Perform ANOVA
+
+```{r}
+aov(rel_quant ~ group, data = czx_cleaned %>% 
+      mutate(group = paste0(solvent, conc))) %>%
+  summary()
+```
+Groups vary significantly. Proceed with Dunnett's test for post hoc testing.
+
+###### Perform Dunnett's test
 
 ```{r}
 calc_p_val_dunn <- function(data) {
@@ -411,7 +447,30 @@ sulfate_cleaned_summarized <- calc_p_val(sulfate_cleaned)
 sulfate_cleaned_summarized
 ```
 
-##### Table Dunnett's test
+##### Dunnett's test
+
+###### Check normality of residues
+
+```{r}
+resids_sulfate <- residuals(lm(rel_quant ~ group, data = sulfate_cleaned %>% mutate(group = paste0(solvent, conc))))
+
+shapiro.test(resids_sulfate)
+```
+
+Residuals are not normally distributed.
+
+Prerequisites for ANOVA are not satisfied. Proceed with Kruskal-Wallis test.
+
+
+###### Perform Kruskal-Wallis test
+
+```{r}
+kruskal.test(rel_quant ~ group, data = sulfate_cleaned %>% 
+      mutate(group = paste0(solvent, conc))) 
+```
+Groups vary significantly. Proceed with Dunnett's test for post hoc testing.
+
+###### Perform Dunnett's test
 
 ```{r}
 sulfate_cleaned_summarized <- calc_p_val_dunn(sulfate_cleaned) %>%
@@ -538,7 +597,28 @@ glucac_cleaned_summarized <- calc_p_val(glucac_cleaned)
 glucac_cleaned_summarized
 ```
 
-##### Table Dunnett's test
+##### Dunnett's test
+
+###### Check normality of residues
+
+```{r}
+resids_glucac <- residuals(lm(rel_quant ~ group, data = glucac_cleaned %>% mutate(group = paste0(solvent, conc))))
+
+shapiro.test(resids_glucac)
+```
+Residuals are not normally distributed.
+
+Prerequisites for ANOVA are not satisfied. Proceed with Kruskal-Wallis test.
+
+###### Perform Kruskal-Wallis test
+
+```{r}
+kruskal.test(rel_quant ~ group, data = glucac_cleaned %>% 
+      mutate(group = paste0(solvent, conc))) 
+```
+Groups vary significantly. Proceed with Dunnett's test for post hoc testing.
+
+###### Perform Dunnett's test
 
 ```{r}
 glucac_cleaned_summarized <- calc_p_val_dunn(glucac_cleaned) %>%
